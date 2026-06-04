@@ -24,7 +24,7 @@ import MediaRemoteAdapter
     static let shared = ViewModel()
     
     // Apple Music Tahoe broken AppleScript workaround
-    let musicController = MediaController(bundleIdentifier: "com.apple.Music")
+    let musicController = MediaController()
 //    var appleMusicUniqueIdentifier: String?
 
     var currentlyPlaying: String?
@@ -47,7 +47,7 @@ import MediaRemoteAdapter
         return formatter.string(from: TimeInterval(totalSeconds)) ?? "0:00"
     }
     private func initAppleMusicWorkaround() {
-        musicController.onTrackInfoReceived = { data in
+        musicController.onTrackInfoReceived = { (data: TrackInfo?) in
             print("Track info received")
             Task { @MainActor in
 //                if self.appleMusicUniqueIdentifier == data.payload.uniqueIdentifier {
@@ -200,6 +200,13 @@ import MediaRemoteAdapter
     private var currentFetchTask: Task<[LyricLine], Error>?
     private var currentLyricsUpdaterTask: Task<Void,Error>?
     private var currentLyricsDriftFix: Task<Void,Error>?
+    private var currentSpotifyWatchdogTask: Task<Void, Never>?
+    private var currentSpotifyEmptyLyricsRetryTask: Task<Void, Never>?
+    private var spotifyEmptyLyricsRetryCount = 0
+    private var lastSpotifyWatchdogTrackID: String?
+    private var lastSpotifyWatchdogPosition: TimeInterval?
+    private let spotifyEmptyLyricsRetryLimit = 2
+    private let spotifyEmptyLyricsRetryDelay: UInt64 = 3_000_000_000
     var isFetching = false
     private var currentAppleMusicFetchTask: Task<Void,Error>?
     
@@ -360,29 +367,31 @@ import MediaRemoteAdapter
     @MainActor
     func fetchAllNetworkLyrics() async -> NetworkFetchReturn {
         guard let currentlyPlaying, let currentlyPlayingName else {
+            spotifySyncLog("fetchAllNetworkLyrics aborted: missing currentlyPlaying or name")
             return NetworkFetchReturn(lyrics: [], colorData: nil)
         }
         for networkLyricProvider in allNetworkLyricProviders {
             do {
-                print("FetchAllNetworkLyrics: fetching from \(networkLyricProvider.providerName)")
+                spotifySyncLog("fetchAllNetworkLyrics provider=\(networkLyricProvider.providerName) start trackID=\(currentlyPlaying)")
                 let lyrics = try await networkLyricProvider.fetchNetworkLyrics(trackName: currentlyPlayingName, trackID: currentlyPlaying, currentlyPlayingArtist: currentlyPlayingArtist, currentAlbumName: currentAlbumName)
                 if !lyrics.lyrics.isEmpty {
                     amplitude.track(eventType: "\(networkLyricProvider.providerName) Fetch")
-                    print("FetchAllNetworkLyrics: returning lyrics from \(networkLyricProvider.providerName)")
+                    spotifySyncLog("fetchAllNetworkLyrics provider=\(networkLyricProvider.providerName) success count=\(lyrics.lyrics.count)")
                     // thats how i save to coredata
                     let _ = SongObject(from: lyrics.lyrics, with: coreDataContainer.viewContext, trackID: currentlyPlaying, trackName: currentlyPlayingName)
                     saveCoreData()
                     return lyrics
                 } else if networkLyricProvider is SpotifyLyricProvider {
-                    print("FetchAllNetworkLyrics: no lyrics from \(networkLyricProvider.providerName)")
+                    spotifySyncLog("fetchAllNetworkLyrics provider=\(networkLyricProvider.providerName) empty")
                     handleSpotifyNoLyricsFallback()
                 } else {
-                    print("FetchAllNetworkLyrics: no lyrics from \(networkLyricProvider.providerName)")
+                    spotifySyncLog("fetchAllNetworkLyrics provider=\(networkLyricProvider.providerName) empty")
                 }
             } catch {
-                print("Caught exception on \(networkLyricProvider.providerName): \(error)")
+                spotifySyncLog("fetchAllNetworkLyrics provider=\(networkLyricProvider.providerName) failed error=\(error)")
             }
         }
+        spotifySyncLog("fetchAllNetworkLyrics exhausted providers; returning empty")
         return NetworkFetchReturn(lyrics: [], colorData: nil)
     }
     
@@ -642,14 +651,31 @@ import MediaRemoteAdapter
         guard currentPlayer == .spotify else {
             return
         }
-        if notification.userInfo?["Player State"] as? String == "Stopped" {
+        ensureSpotifyWatchdog()
+        let notificationTrackID = (notification.userInfo?["Track ID"] as? String)?.spotifyProcessedUrl()
+        let notificationTrackName = notification.userInfo?["Name"] as? String
+        let playerState = notification.userInfo?["Player State"] as? String
+        let scriptPosition = spotifyPlayer.currentTime.map { String($0) } ?? "nil"
+        let notificationSummary = [
+            "notification state=\(playerState ?? "nil")",
+            "notificationTrackID=\(notificationTrackID ?? "nil")",
+            "notificationName=\(notificationTrackName ?? "nil")",
+            "scriptTrackID=\(spotifyPlayer.trackID ?? "nil")",
+            "scriptName=\(spotifyPlayer.trackName ?? "nil")",
+            "artist=\(spotifyPlayer.artistName ?? "nil")",
+            "position=\(scriptPosition)",
+            "internalTrackID=\(currentlyPlaying ?? "nil")"
+        ].joined(separator: " ")
+        spotifySyncLog(notificationSummary)
+        if playerState == "Stopped" {
             currentLyricsDriftFix?.cancel()
             isPlaying = false
             isStopped = true
+            stopLyricUpdater()
             return
         }
         isStopped = false
-        if notification.userInfo?["Player State"] as? String == "Playing" {
+        if playerState == "Playing" {
             print("is playing")
             isPlaying = true
         } else {
@@ -657,15 +683,187 @@ import MediaRemoteAdapter
             isPlaying = false
             // manually cancels the lyric-updater task bc media is paused
         }
-        print(notification.userInfo?["Track ID"] as? String)
-        let currentlyPlaying = (notification.userInfo?["Track ID"] as? String)?.spotifyProcessedUrl()
-        let currentlyPlayingName = (notification.userInfo?["Name"] as? String)
+        let currentlyPlaying = notificationTrackID ?? spotifyPlayer.trackID
+        let currentlyPlayingName = notificationTrackName ?? spotifyPlayer.trackName
         if currentlyPlaying != "", currentlyPlayingName != "", let duration = currentPlayerInstance.duration {
+            if self.currentlyPlaying != currentlyPlaying {
+                spotifySyncLog("track changed via notification \(self.currentlyPlaying ?? "nil") -> \(currentlyPlaying ?? "nil")")
+                resetSpotifyEmptyLyricsRetry()
+                stopLyricUpdater()
+            }
             self.currentlyPlaying = currentlyPlaying
             self.currentlyPlayingName = currentlyPlayingName
             self.currentlyPlayingArtist = spotifyPlayer.artistName
             self.currentAlbumName = spotifyPlayer.albumName
             self.duration = duration
+            if let currentTime = spotifyPlayer.currentTime {
+                self.currentTime = CurrentTimeWithStoredDate(currentTime: currentTime)
+            }
+        } else {
+            spotifySyncLog("ignored notification because track metadata was incomplete")
+        }
+    }
+
+    private func spotifySyncLog(_ message: String) {
+        print("[LyricFever][SpotifySync] \(message)")
+    }
+
+    private func resetLyricStateForTrackChange() {
+        stopLyricUpdater()
+        currentlyPlayingLyricsIndex = nil
+        currentlyPlayingLyrics = []
+        translatedLyric = []
+        romanizedLyrics = []
+        chineseConversionLyrics = []
+        lyricsIsEmptyPostLoad = false
+        isFetching = true
+    }
+
+    private func resetSpotifyEmptyLyricsRetry() {
+        currentSpotifyEmptyLyricsRetryTask?.cancel()
+        currentSpotifyEmptyLyricsRetryTask = nil
+        spotifyEmptyLyricsRetryCount = 0
+    }
+
+    private func ensureSpotifyWatchdog() {
+        guard currentPlayer == .spotify else {
+            currentSpotifyWatchdogTask?.cancel()
+            currentSpotifyWatchdogTask = nil
+            return
+        }
+        guard currentSpotifyWatchdogTask == nil else {
+            return
+        }
+        currentSpotifyWatchdogTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                if Task.isCancelled {
+                    break
+                }
+                self.spotifyWatchdogTick()
+            }
+        }
+    }
+
+    private func spotifyWatchdogTick() {
+        guard currentPlayer == .spotify else {
+            spotifySyncLog("watchdog stopping because currentPlayer is not Spotify")
+            currentSpotifyWatchdogTask?.cancel()
+            currentSpotifyWatchdogTask = nil
+            return
+        }
+        guard spotifyPlayer.isRunning else {
+            spotifySyncLog("watchdog: Spotify is not running")
+            return
+        }
+
+        let spotifyTrackID = spotifyPlayer.trackID
+        let spotifyTrackName = spotifyPlayer.trackName
+        let spotifyPosition = spotifyPlayer.currentTime
+        let spotifyIsPlaying = spotifyPlayer.isPlaying
+        let watchdogPosition = spotifyPosition.map { String($0) } ?? "nil"
+        let watchdogSummary = [
+            "watchdog trackID=\(spotifyTrackID ?? "nil")",
+            "name=\(spotifyTrackName ?? "nil")",
+            "position=\(watchdogPosition)",
+            "isPlaying=\(spotifyIsPlaying)",
+            "internalTrackID=\(currentlyPlaying ?? "nil")",
+            "lyricsCount=\(currentlyPlayingLyrics.count)",
+            "isFetching=\(isFetching)",
+            "emptyPostLoad=\(lyricsIsEmptyPostLoad)"
+        ].joined(separator: " ")
+        spotifySyncLog(watchdogSummary)
+
+        isPlaying = spotifyIsPlaying
+        guard spotifyIsPlaying else {
+            lastSpotifyWatchdogTrackID = spotifyTrackID
+            lastSpotifyWatchdogPosition = spotifyPosition
+            return
+        }
+
+        if let spotifyTrackID, !spotifyTrackID.isEmpty, let spotifyTrackName, !spotifyTrackName.isEmpty {
+            if spotifyTrackID != currentlyPlaying {
+                spotifySyncLog("watchdog correcting stale internal trackID \(currentlyPlaying ?? "nil") -> \(spotifyTrackID)")
+                resetSpotifyEmptyLyricsRetry()
+                stopLyricUpdater()
+                currentlyPlaying = spotifyTrackID
+                currentlyPlayingName = spotifyTrackName
+                currentlyPlayingArtist = spotifyPlayer.artistName
+                currentAlbumName = spotifyPlayer.albumName
+                if let duration = spotifyPlayer.duration {
+                    self.duration = duration
+                }
+            } else if currentlyPlayingLyrics.isEmpty, !isFetching, userDefaultStorage.hasOnboarded {
+                scheduleSpotifyEmptyLyricsRetry(for: spotifyTrackID, trackName: spotifyTrackName, reason: "watchdog saw empty lyrics")
+            }
+        }
+
+        if lastSpotifyWatchdogTrackID == spotifyTrackID,
+           let lastPosition = lastSpotifyWatchdogPosition,
+           let spotifyPosition,
+           lastPosition > 10_000,
+           spotifyPosition < 3_000 {
+            spotifySyncLog("watchdog detected position reset for same track; restarting lyric updater")
+            currentlyPlayingLyricsIndex = nil
+            if currentlyPlayingLyrics.isEmpty, let spotifyTrackID, let spotifyTrackName {
+                scheduleSpotifyEmptyLyricsRetry(for: spotifyTrackID, trackName: spotifyTrackName, reason: "same-track position reset with empty lyrics")
+            } else {
+                startLyricUpdater()
+            }
+        }
+
+        lastSpotifyWatchdogTrackID = spotifyTrackID
+        lastSpotifyWatchdogPosition = spotifyPosition
+    }
+
+    private func scheduleSpotifyEmptyLyricsRetry(for trackID: String, trackName: String, reason: String) {
+        guard currentPlayer == .spotify, userDefaultStorage.hasOnboarded, isPlaying else {
+            return
+        }
+        guard currentlyPlaying == trackID, currentlyPlayingLyrics.isEmpty, !isFetching else {
+            return
+        }
+        guard spotifyEmptyLyricsRetryCount < spotifyEmptyLyricsRetryLimit else {
+            spotifySyncLog("empty lyrics retry limit reached for \(trackID)")
+            return
+        }
+        guard currentSpotifyEmptyLyricsRetryTask == nil else {
+            return
+        }
+
+        let attempt = spotifyEmptyLyricsRetryCount + 1
+        spotifySyncLog("scheduling empty lyrics retry #\(attempt) for \(trackID): \(reason)")
+        currentSpotifyEmptyLyricsRetryTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: spotifyEmptyLyricsRetryDelay)
+            if Task.isCancelled {
+                return
+            }
+            currentSpotifyEmptyLyricsRetryTask = nil
+            guard currentPlayer == .spotify,
+                  currentlyPlaying == trackID,
+                  currentlyPlayingLyrics.isEmpty,
+                  !isFetching,
+                  userDefaultStorage.hasOnboarded,
+                  isPlaying else {
+                spotifySyncLog("empty lyrics retry #\(attempt) skipped because state recovered or changed")
+                return
+            }
+
+            spotifyEmptyLyricsRetryCount = attempt
+            spotifySyncLog("running empty lyrics retry #\(attempt) for \(trackID)")
+            guard let lyrics = await fetch(for: trackID, trackName, checkCoreDataFirst: true) else {
+                spotifySyncLog("empty lyrics retry #\(attempt) returned nil")
+                scheduleSpotifyEmptyLyricsRetry(for: trackID, trackName: trackName, reason: "retry returned nil")
+                return
+            }
+            guard currentlyPlaying == trackID else {
+                spotifySyncLog("empty lyrics retry #\(attempt) ignored stale result for \(trackID)")
+                return
+            }
+            setNewLyricsColorTranslationRomanizationAndStartUpdater(with: lyrics)
+            if lyrics.isEmpty {
+                scheduleSpotifyEmptyLyricsRetry(for: trackID, trackName: trackName, reason: "retry returned empty lyrics")
+            }
         }
     }
     
@@ -674,14 +872,40 @@ import MediaRemoteAdapter
     }
     
     func onCurrentlyPlayingIDChange() async {
-        currentlyPlayingLyricsIndex = nil
-        currentlyPlayingLyrics = []
-        translatedLyric = []
-        romanizedLyrics = []
-        chineseConversionLyrics = []
-        
-        if userDefaultStorage.hasOnboarded, let currentlyPlaying = currentlyPlaying, let currentlyPlayingName = currentlyPlayingName, let lyrics = await fetch(for: currentlyPlaying, currentlyPlayingName) {
+        let expectedTrackID = currentlyPlaying
+        spotifySyncLog("onCurrentlyPlayingIDChange expectedTrackID=\(expectedTrackID ?? "nil") name=\(currentlyPlayingName ?? "nil") lyricsCount=\(currentlyPlayingLyrics.count) isFetching=\(isFetching) emptyPostLoad=\(lyricsIsEmptyPostLoad)")
+        if currentPlayer == .spotify {
+            resetSpotifyEmptyLyricsRetry()
+            resetLyricStateForTrackChange()
+            ensureSpotifyWatchdog()
+        } else {
+            currentlyPlayingLyricsIndex = nil
+            currentlyPlayingLyrics = []
+            translatedLyric = []
+            romanizedLyrics = []
+            chineseConversionLyrics = []
+        }
+
+        guard userDefaultStorage.hasOnboarded, let currentlyPlaying = currentlyPlaying, let currentlyPlayingName = currentlyPlayingName else {
+            isFetching = false
+            spotifySyncLog("onCurrentlyPlayingIDChange skipped because onboarding or metadata is missing")
+            return
+        }
+
+        if let lyrics = await fetch(for: currentlyPlaying, currentlyPlayingName) {
+            guard self.currentlyPlaying == currentlyPlaying else {
+                spotifySyncLog("onCurrentlyPlayingIDChange ignored stale lyrics for \(currentlyPlaying); current=\(self.currentlyPlaying ?? "nil")")
+                return
+            }
+            spotifySyncLog("onCurrentlyPlayingIDChange fetched lyrics count=\(lyrics.count) for \(currentlyPlaying)")
             setNewLyricsColorTranslationRomanizationAndStartUpdater(with: lyrics)
+            if currentPlayer == .spotify, lyrics.isEmpty {
+                scheduleSpotifyEmptyLyricsRetry(for: currentlyPlaying, trackName: currentlyPlayingName, reason: "initial fetch returned empty lyrics")
+            }
+        } else if currentPlayer == .spotify, self.currentlyPlaying == currentlyPlaying {
+            spotifySyncLog("onCurrentlyPlayingIDChange fetch returned nil for \(currentlyPlaying); keeping emptyPostLoad=false and scheduling retry")
+            lyricsIsEmptyPostLoad = false
+            scheduleSpotifyEmptyLyricsRetry(for: currentlyPlaying, trackName: currentlyPlayingName, reason: "initial fetch returned nil")
 //            currentlyPlayingLyrics = lyrics
 //            setBackgroundColor()
 //            romanizeDidChange()
@@ -741,14 +965,11 @@ import MediaRemoteAdapter
                 // if current time is before our current index's start time, the user has scrubbed and rewinded
                 // reset into linear search mode
                 if currentTime < currentlyPlayingLyrics[currentlyPlayingLyricsIndex].startTimeMS {
+                    spotifySyncLog("upcomingIndex recovered after rewind: currentTime=\(currentTime) currentIndexStart=\(currentlyPlayingLyrics[currentlyPlayingLyricsIndex].startTimeMS)")
                     return currentlyPlayingLyrics.firstIndex(where: {$0.startTimeMS > currentTime})
                 }
                 // we've reached the end of the song, we're past the last lyric
-                //TODO: remove these
-                #if os(macOS)
-                currentlyPlayingAppleMusicPersistentID = nil
-                #endif
-                currentlyPlaying = nil
+                spotifySyncLog("upcomingIndex nil: past final lyric currentTime=\(currentTime) lyricsCount=\(currentlyPlayingLyrics.count)")
                 return nil
             }
             else if  currentTime > currentlyPlayingLyrics[currentlyPlayingLyricsIndex].startTimeMS, currentTime < currentlyPlayingLyrics[newIndex].startTimeMS {
@@ -758,12 +979,22 @@ import MediaRemoteAdapter
         }
         // linear search through the array to find the first lyric that's right after the current time
         // done on first lyric update for the song, as well as post-scrubbing
-        return currentlyPlayingLyrics.firstIndex(where: {$0.startTimeMS > currentTime})
+        let nextIndex = currentlyPlayingLyrics.firstIndex(where: {$0.startTimeMS > currentTime})
+        if nextIndex == nil {
+            spotifySyncLog("upcomingIndex nil: linear search found no later lyric currentTime=\(currentTime) lyricsCount=\(currentlyPlayingLyrics.count)")
+        }
+        return nextIndex
     }
     
     func lyricUpdater() async throws {
         repeat {
-            guard let currentTime = currentPlayerInstance.currentTime, let lastIndex: Int = upcomingIndex(currentTime) else {
+            guard let currentTime = currentPlayerInstance.currentTime else {
+                spotifySyncLog("lyricUpdater stopping: currentTime is nil")
+                stopLyricUpdater()
+                return
+            }
+            guard let lastIndex: Int = upcomingIndex(currentTime) else {
+                spotifySyncLog("lyricUpdater stopping: upcomingIndex returned nil trackID=\(currentlyPlaying ?? "nil") position=\(currentTime) lyricsCount=\(currentlyPlayingLyrics.count)")
                 stopLyricUpdater()
                 return
             }
@@ -793,13 +1024,16 @@ import MediaRemoteAdapter
     }
     
     func startLyricUpdater() {
+        spotifySyncLog("startLyricUpdater called isPlaying=\(isPlaying) lyricsCount=\(currentlyPlayingLyrics.count) index=\(currentlyPlayingLyricsIndex.map(String.init) ?? "nil") mustUpdateUrgent=\(mustUpdateUrgent)")
         currentLyricsUpdaterTask?.cancel()
         if !isPlaying || currentlyPlayingLyrics.isEmpty || mustUpdateUrgent {
+            spotifySyncLog("startLyricUpdater skipped isPlaying=\(isPlaying) lyricsCount=\(currentlyPlayingLyrics.count) mustUpdateUrgent=\(mustUpdateUrgent)")
             return
         }
         // If an index exists, we're unpausing: meaning we must instantly find the current lyric
         if currentlyPlayingLyricsIndex != nil {
             guard let currentTime = currentPlayerInstance.currentTime, let lastIndex: Int = upcomingIndex(currentTime) else {
+                spotifySyncLog("startLyricUpdater failed to determine current lyric; stopping updater")
                 stopLyricUpdater()
                 return
             }
@@ -836,7 +1070,7 @@ import MediaRemoteAdapter
     }
     
     func stopLyricUpdater() {
-        print("stop called")
+        spotifySyncLog("stopLyricUpdater called trackID=\(currentlyPlaying ?? "nil") lyricsCount=\(currentlyPlayingLyrics.count) index=\(currentlyPlayingLyricsIndex.map(String.init) ?? "nil")")
         currentLyricsUpdaterTask?.cancel()
     }
     
@@ -859,17 +1093,18 @@ import MediaRemoteAdapter
         if isFirstFetch {
             isFirstFetch = false
         }
-        print("Fetch Called for trackID \(trackID), trackName \(trackName), checkCoreDataFirst: \(checkCoreDataFirst)")
+        spotifySyncLog("fetch start trackID=\(trackID) trackName=\(trackName) checkCoreDataFirst=\(checkCoreDataFirst) internalTrackID=\(currentlyPlaying ?? "nil") isFetching=\(isFetching) emptyPostLoad=\(lyricsIsEmptyPostLoad)")
         currentFetchTask?.cancel()
         // i don't set isFetching to true here to prevent "flashes" for CoreData fetches
         defer {
             isFetching = false
+            spotifySyncLog("fetch end trackID=\(trackID) internalTrackID=\(currentlyPlaying ?? "nil") lyricsCount=\(currentlyPlayingLyrics.count) isFetching=\(isFetching) emptyPostLoad=\(lyricsIsEmptyPostLoad)")
         }
         currentFetchTask = Task { try await self.fetchLyrics(for: trackID, trackName, checkCoreDataFirst: checkCoreDataFirst) }
         do {
             return try await currentFetchTask?.value
         } catch {
-            print("error \(error)")
+            spotifySyncLog("fetch failed trackID=\(trackID) error=\(error)")
             return nil
         }
     }
@@ -920,32 +1155,32 @@ import MediaRemoteAdapter
     
     func fetchLyrics(for trackID: String, _ trackName: String, checkCoreDataFirst: Bool) async throws -> [LyricLine] {
         let initiatingTrackID = trackID
+        spotifySyncLog("fetchLyrics begin trackID=\(trackID) trackName=\(trackName) checkCoreDataFirst=\(checkCoreDataFirst)")
         
         if checkCoreDataFirst, let lyrics = fetchFromCoreData(for: trackID) {
-            print("ViewModel FetchLyrics: got lyrics from core data :D \(trackID) \(trackName)")
+            spotifySyncLog("fetchLyrics CoreData hit trackID=\(trackID) count=\(lyrics.count)")
             try Task.checkCancellation()
             amplitude.track(eventType: "CoreData Fetch")
             // verify non-stale trackID
             if initiatingTrackID != self.currentlyPlaying {
-                print("FetchLyrics: CoreData result stale (initiated: \(initiatingTrackID), current: \(self.currentlyPlaying ?? "nil")). Throwing.")
+                spotifySyncLog("fetchLyrics CoreData result stale initiated=\(initiatingTrackID) current=\(self.currentlyPlaying ?? "nil")")
                 throw FetchError.staleTrack
             }
             return lyrics
         } else {
-            print("ViewModel FetchLyrics: no lyrics from core data, going to download from internet \(trackID) \(trackName)")
-            print("ViewModel FetchLyrics: isFetching set to true")
+            spotifySyncLog("fetchLyrics CoreData miss; fetching remote trackID=\(trackID) trackName=\(trackName)")
             isFetching = true
             
             var networkLyrics: NetworkFetchReturn = await fetchAllNetworkLyrics()
             
             // verify non-stale trackID
             if initiatingTrackID != self.currentlyPlaying {
-                print("FetchLyrics: Network result stale (initiated: \(initiatingTrackID), current: \(self.currentlyPlaying ?? "nil")). Throwing.")
+                spotifySyncLog("fetchLyrics network result stale initiated=\(initiatingTrackID) current=\(self.currentlyPlaying ?? "nil")")
                 throw FetchError.staleTrack
             }
             
             guard let duration = currentPlayerInstance.duration else {
-                print("FetchLyrics: Couldn't access current player duration. Giving up on netwokr fetch")
+                spotifySyncLog("fetchLyrics remote failed: duration unavailable")
                 return []
             }
             networkLyrics = networkLyrics.processed(withSongName: trackName, duration: duration)
@@ -954,9 +1189,10 @@ import MediaRemoteAdapter
             if initiatingTrackID == self.currentlyPlaying {
                 callColorDataServiceOnLyricColorOrArtwork(colorData: networkLyrics.colorData)
             } else {
-                print("FetchLyrics: Skipping color save due to stale track (initiated: \(initiatingTrackID), current: \(self.currentlyPlaying ?? "nil")).")
+                spotifySyncLog("fetchLyrics skipping color save due to stale track initiated=\(initiatingTrackID) current=\(self.currentlyPlaying ?? "nil")")
                 throw FetchError.staleTrack
             }
+            spotifySyncLog("fetchLyrics remote finished trackID=\(trackID) count=\(networkLyrics.lyrics.count)")
             return networkLyrics.lyrics
         }
     }
@@ -1001,14 +1237,14 @@ import MediaRemoteAdapter
             if let songObject = results.first {
                 // Found the SongObject with the matching trackID
                 let lyricsArray = zip(songObject.lyricsTimestamps, songObject.lyricsWords).map { LyricLine(startTime: $0, words: $1) }
-                print("Found SongObject with ID:", songObject.id)
+                spotifySyncLog("fetchFromCoreData hit trackID=\(trackID) count=\(lyricsArray.count)")
                 return lyricsArray
             } else {
                 // No SongObject found with the given trackID
-                print("No SongObject found with the provided trackID. \(trackID)")
+                spotifySyncLog("fetchFromCoreData miss trackID=\(trackID)")
             }
         } catch {
-            print("Error fetching SongObject:", error)
+            spotifySyncLog("fetchFromCoreData error trackID=\(trackID) error=\(error)")
         }
         return nil
     }
@@ -1050,7 +1286,11 @@ import MediaRemoteAdapter
     
     #if os(macOS)
     func setNewLyricsColorTranslationRomanizationAndStartUpdater(with newLyrics: [LyricLine]) {
+        spotifySyncLog("setNewLyrics count=\(newLyrics.count) trackID=\(currentlyPlaying ?? "nil") isPlaying=\(isPlaying)")
         currentlyPlayingLyrics = newLyrics
+        if currentPlayer == .spotify, !newLyrics.isEmpty {
+            resetSpotifyEmptyLyricsRetry()
+        }
         setBackgroundColor()
         fetchTranslationSourceLanguage()
         let _ = reloadTranslationConfigIfTranslating()
@@ -1059,6 +1299,7 @@ import MediaRemoteAdapter
         // we romanize afterwards, in-case the chinese conversion array was populated
         romanizeDidChange()
         lyricsIsEmptyPostLoad = currentlyPlayingLyrics.isEmpty
+        spotifySyncLog("setNewLyrics done lyricsCount=\(currentlyPlayingLyrics.count) emptyPostLoad=\(lyricsIsEmptyPostLoad)")
         if isPlaying, !currentlyPlayingLyrics.isEmpty, showLyrics, userDefaultStorage.hasOnboarded {
             startLyricUpdater()
         }
@@ -1102,6 +1343,9 @@ import MediaRemoteAdapter
             isPlaying = true
         }
         setCurrentProperties()
+        if currentPlayer == .spotify {
+            ensureSpotifyWatchdog()
+        }
         startLyricUpdater()
     }
 }
@@ -1212,4 +1456,3 @@ extension ViewModel {
     }
 }
 #endif
-
