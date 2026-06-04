@@ -47,18 +47,7 @@ struct LyricFever: App {
                     print("Incorrect task fired. Ignored on nil currentlyPlaying value")
                     return
                 }
-                print("Artwork Fetch Service:Fetching new artwork image for currentlyPlaying change")
-                if let artworkImage = await viewmodel.currentPlayerInstance.artworkImage {
-                    print("Artwork Fetch Service: Fetched from player")
-                    viewmodel.artworkImage = artworkImage
-                } else if let artistName = viewmodel.currentlyPlayingArtist, let currentAlbumName = viewmodel.currentAlbumName {
-                    if let mbid = await MusicBrainzArtworkService.findMbid(albumName: currentAlbumName, artistName: artistName) {
-                        print("Artwork Fetch Service: MusicBrainz Success")
-                        viewmodel.artworkImage = await MusicBrainzArtworkService.artworkImage(for: mbid)
-                    }
-                } else {
-                    print("Artwork Fetch Service: couldn't grab mbid image nor player image")
-                }
+                viewmodel.refreshArtworkForCurrentTrack(reason: "currentlyPlaying task")
             }
             .task(id: viewmodel.userDefaultStorage.latestUpdateWindowShown) {
                 if viewmodel.userDefaultStorage.latestUpdateWindowShown < 33 {
@@ -264,4 +253,3 @@ extension String {
         return (self.count > length) ? self.prefix(length) + trailing : self
     }
 }
-

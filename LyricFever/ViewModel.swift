@@ -48,7 +48,7 @@ import MediaRemoteAdapter
     }
     private func initAppleMusicWorkaround() {
         musicController.onTrackInfoReceived = { (data: TrackInfo?) in
-            print("Track info received")
+            print("Track info received application=\(data?.payload.applicationName ?? "nil") hasArtwork=\(data?.payload.artwork != nil)")
             Task { @MainActor in
 //                if self.appleMusicUniqueIdentifier == data.payload.uniqueIdentifier {
 //                    print("Apple Music Artwork Workaround: Ignoring artwork for existing song")
@@ -66,9 +66,8 @@ import MediaRemoteAdapter
                     print("Apple Music Artwork Workaround: Ignoring No Artwork")
                     return
                 }
-                guard data?.payload.applicationName == "Music" else {
-                    return
-                }
+                // MediaRemoteAdapter's applicationName can vary between macOS releases.
+                // currentPlayer already scopes this path to Apple Music for Lyric Fever.
                 self.artworkImage = artwork
             }
             // This will only be called for Apple Music events
@@ -200,6 +199,7 @@ import MediaRemoteAdapter
     private var currentFetchTask: Task<[LyricLine], Error>?
     private var currentLyricsUpdaterTask: Task<Void,Error>?
     private var currentLyricsDriftFix: Task<Void,Error>?
+    private var currentArtworkFetchTask: Task<Void, Never>?
     private var currentSpotifyWatchdogTask: Task<Void, Never>?
     private var currentSpotifyEmptyLyricsRetryTask: Task<Void, Never>?
     private var spotifyEmptyLyricsRetryCount = 0
@@ -699,6 +699,7 @@ import MediaRemoteAdapter
             if let currentTime = spotifyPlayer.currentTime {
                 self.currentTime = CurrentTimeWithStoredDate(currentTime: currentTime)
             }
+            refreshArtworkForCurrentTrack(reason: "spotify notification")
         } else {
             spotifySyncLog("ignored notification because track metadata was incomplete")
         }
@@ -706,6 +707,65 @@ import MediaRemoteAdapter
 
     private func spotifySyncLog(_ message: String) {
         print("[LyricFever][SpotifySync] \(message)")
+    }
+
+    func refreshArtworkForCurrentTrack(reason: String) {
+        guard let targetTrackID = currentlyPlaying, !targetTrackID.isEmpty else {
+            print("[LyricFever][Artwork] refresh skipped reason=\(reason) trackID=nil")
+            artworkImage = nil
+            return
+        }
+
+        let targetPlayer = currentPlayer
+        let targetArtist = currentlyPlayingArtist
+        let targetAlbum = currentAlbumName
+        let targetName = currentlyPlayingName ?? "nil"
+
+        currentArtworkFetchTask?.cancel()
+        currentArtworkFetchTask = Task { @MainActor in
+            print("[LyricFever][Artwork] refresh start reason=\(reason) trackID=\(targetTrackID) name=\(targetName)")
+            let retryDelays: [UInt64] = [0, 600_000_000, 1_800_000_000]
+
+            for (attempt, delay) in retryDelays.enumerated() {
+                if delay > 0 {
+                    try? await Task.sleep(nanoseconds: delay)
+                }
+                if Task.isCancelled {
+                    return
+                }
+                guard self.currentlyPlaying == targetTrackID, self.currentPlayer == targetPlayer else {
+                    print("[LyricFever][Artwork] stale refresh ignored target=\(targetTrackID) current=\(self.currentlyPlaying ?? "nil")")
+                    return
+                }
+                if let artworkImage = await self.currentPlayerInstance.artworkImage {
+                    guard self.currentlyPlaying == targetTrackID, self.currentPlayer == targetPlayer else {
+                        print("[LyricFever][Artwork] stale player artwork ignored target=\(targetTrackID) current=\(self.currentlyPlaying ?? "nil")")
+                        return
+                    }
+                    print("[LyricFever][Artwork] player artwork success attempt=\(attempt + 1) trackID=\(targetTrackID)")
+                    self.artworkImage = artworkImage
+                    return
+                }
+                print("[LyricFever][Artwork] player artwork missing attempt=\(attempt + 1) trackID=\(targetTrackID)")
+            }
+
+            guard self.currentlyPlaying == targetTrackID, self.currentPlayer == targetPlayer else {
+                print("[LyricFever][Artwork] stale fallback ignored target=\(targetTrackID) current=\(self.currentlyPlaying ?? "nil")")
+                return
+            }
+            if let targetArtist, let targetAlbum,
+               let mbid = await MusicBrainzArtworkService.findMbid(albumName: targetAlbum, artistName: targetArtist),
+               let artworkImage = await MusicBrainzArtworkService.artworkImage(for: mbid) {
+                guard self.currentlyPlaying == targetTrackID, self.currentPlayer == targetPlayer else {
+                    print("[LyricFever][Artwork] stale MusicBrainz artwork ignored target=\(targetTrackID) current=\(self.currentlyPlaying ?? "nil")")
+                    return
+                }
+                print("[LyricFever][Artwork] MusicBrainz artwork success trackID=\(targetTrackID)")
+                self.artworkImage = artworkImage
+                return
+            }
+            print("[LyricFever][Artwork] artwork unavailable trackID=\(targetTrackID)")
+        }
     }
 
     private func resetLyricStateForTrackChange() {
@@ -793,6 +853,7 @@ import MediaRemoteAdapter
                 if let duration = spotifyPlayer.duration {
                     self.duration = duration
                 }
+                refreshArtworkForCurrentTrack(reason: "spotify watchdog track correction")
             } else if currentlyPlayingLyrics.isEmpty, !isFetching, userDefaultStorage.hasOnboarded {
                 scheduleSpotifyEmptyLyricsRetry(for: spotifyTrackID, trackName: spotifyTrackName, reason: "watchdog saw empty lyrics")
             }
