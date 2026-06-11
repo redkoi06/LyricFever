@@ -19,7 +19,15 @@ struct LyricLine: Decodable, Hashable {
     
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.startTimeMS = TimeInterval(try container.decode(String.self, forKey: .startTimeMS))!
+        let startTimeString = try container.decode(String.self, forKey: .startTimeMS)
+        guard let startTimeMS = TimeInterval(startTimeString), startTimeMS.isFinite else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .startTimeMS,
+                in: container,
+                debugDescription: "Invalid lyric timestamp: \(startTimeString)"
+            )
+        }
+        self.startTimeMS = startTimeMS
         self.words = try container.decode(String.self, forKey: .words)
     }
     

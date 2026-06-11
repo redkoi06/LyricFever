@@ -17,20 +17,24 @@ struct MenubarLabelView: View {
         } else if viewmodel.userDefaultStorage.hasOnboarded {
             // Try to work through lyric logic if onboarded
             // NEW: Revert to song name if fullscreen / karaoke activated
-            if !viewmodel.fullscreen, !viewmodel.userDefaultStorage.karaoke, viewmodel.isPlaying, viewmodel.showLyrics, let currentlyPlayingLyricsIndex = viewmodel.currentlyPlayingLyricsIndex {
+            if !viewmodel.fullscreen,
+               !viewmodel.userDefaultStorage.karaoke,
+               viewmodel.isPlaying,
+               viewmodel.showLyrics,
+               let currentlyPlayingLyricsIndex = viewmodel.currentlyPlayingLyricsIndex,
+               let currentLyric = viewmodel.currentlyPlayingLyrics[safe: currentlyPlayingLyricsIndex] {
                 // Attempt to display translations
-                // Implicit assumption: translatedLyric.count == currentlyPlayingLyrics.count
-                if viewmodel.translationExists {
+                if let translatedLyric = viewmodel.translatedLyric[safe: currentlyPlayingLyricsIndex] {
                     // I don't localize, because I deliver the lyric verbatim
-                    return viewmodel.translatedLyric[currentlyPlayingLyricsIndex]
+                    return translatedLyric
                 } else {
                     // Attempt to display Romanization
-                    if !viewmodel.romanizedLyrics.isEmpty {
-                        return viewmodel.romanizedLyrics[currentlyPlayingLyricsIndex]
-                    } else if !viewmodel.chineseConversionLyrics.isEmpty {
-                        return viewmodel.chineseConversionLyrics[currentlyPlayingLyricsIndex]
+                    if let romanizedLyric = viewmodel.romanizedLyrics[safe: currentlyPlayingLyricsIndex] {
+                        return romanizedLyric
+                    } else if let convertedLyric = viewmodel.chineseConversionLyrics[safe: currentlyPlayingLyricsIndex] {
+                        return convertedLyric
                     } else {
-                        return viewmodel.currentlyPlayingLyrics[currentlyPlayingLyricsIndex].words
+                        return currentLyric.words
                     }
                 }
             // Backup: Display name and artist

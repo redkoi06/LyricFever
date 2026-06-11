@@ -34,48 +34,53 @@ struct KaraokeView: View {
     @AppStorage("karaokeUseAlbumColor") var karaokeUseAlbumColor: Bool = true
     @AppStorage("fixedKaraokeColorHex") var fixedKaraokeColorHex: String = "#2D3CCC"
     
-    func currentWords(for currentlyPlayingLyricsIndex: Int) -> String {
-        if !viewmodel.romanizedLyrics.isEmpty {
-            return viewmodel.romanizedLyrics[currentlyPlayingLyricsIndex]
-        } else if !viewmodel.chineseConversionLyrics.isEmpty {
-            return viewmodel.chineseConversionLyrics[currentlyPlayingLyricsIndex]
+    func currentWords(for currentlyPlayingLyricsIndex: Int) -> String? {
+        if let romanizedLyric = viewmodel.romanizedLyrics[safe: currentlyPlayingLyricsIndex] {
+            return romanizedLyric
+        } else if let convertedLyric = viewmodel.chineseConversionLyrics[safe: currentlyPlayingLyricsIndex] {
+            return convertedLyric
         } else {
-            return viewmodel.currentlyPlayingLyrics[currentlyPlayingLyricsIndex].words
+            return viewmodel.currentlyPlayingLyrics[safe: currentlyPlayingLyricsIndex]?.words
         }
     }
     
     func multilingualView(_ currentlyPlayingLyricsIndex: Int) -> some View {
         VStack(spacing: 6) {
-            Text(verbatim: currentWords(for: currentlyPlayingLyricsIndex))
+            Text(verbatim: currentWords(for: currentlyPlayingLyricsIndex) ?? "")
                 
 //            Text(verbatim: viewmodel.romanizedLyrics.isEmpty ? viewmodel.currentlyPlayingLyrics[currentlyPlayingLyricsIndex].words : viewmodel.romanizedLyrics[currentlyPlayingLyricsIndex])
-            Text(verbatim: viewmodel.translatedLyric[currentlyPlayingLyricsIndex])
+            Text(verbatim: viewmodel.translatedLyric[safe: currentlyPlayingLyricsIndex] ?? "")
                 .font(.custom(viewmodel.karaokeFont.fontName, size: 0.9*(viewmodel.karaokeFont.pointSize)))
                 .opacity(0.85)
         }
     }
     
     func originalAndTranslationAreDifferent(for currentlyPlayingLyricsIndex: Int) -> Bool {
-        viewmodel.currentlyPlayingLyrics[currentlyPlayingLyricsIndex].words != viewmodel.translatedLyric[currentlyPlayingLyricsIndex]
+        guard let originalLyric = viewmodel.currentlyPlayingLyrics[safe: currentlyPlayingLyricsIndex]?.words,
+              let translatedLyric = viewmodel.translatedLyric[safe: currentlyPlayingLyricsIndex] else {
+            return false
+        }
+        return originalLyric != translatedLyric
     }
     
     @ViewBuilder
     func lyricsView() -> some View {
-        if let currentlyPlayingLyricsIndex = viewmodel.currentlyPlayingLyricsIndex {
-            if viewmodel.translationExists {
+        if let currentlyPlayingLyricsIndex = viewmodel.currentlyPlayingLyricsIndex,
+           let originalLyric = viewmodel.currentlyPlayingLyrics[safe: currentlyPlayingLyricsIndex] {
+            if let translatedLyric = viewmodel.translatedLyric[safe: currentlyPlayingLyricsIndex] {
                 if karaokeShowMultilingual, originalAndTranslationAreDifferent(for: currentlyPlayingLyricsIndex) {
                     multilingualView(currentlyPlayingLyricsIndex)
                 }
                 else {
-                    Text(verbatim: viewmodel.translatedLyric[currentlyPlayingLyricsIndex])
+                    Text(verbatim: translatedLyric)
                 }
             } else {
-                if !viewmodel.romanizedLyrics.isEmpty {
-                    Text(verbatim: viewmodel.romanizedLyrics[currentlyPlayingLyricsIndex])
-                } else if !viewmodel.chineseConversionLyrics.isEmpty {
-                    Text(verbatim: viewmodel.chineseConversionLyrics[currentlyPlayingLyricsIndex])
+                if let romanizedLyric = viewmodel.romanizedLyrics[safe: currentlyPlayingLyricsIndex] {
+                    Text(verbatim: romanizedLyric)
+                } else if let convertedLyric = viewmodel.chineseConversionLyrics[safe: currentlyPlayingLyricsIndex] {
+                    Text(verbatim: convertedLyric)
                 } else {
-                    Text(verbatim: viewmodel.currentlyPlayingLyrics[currentlyPlayingLyricsIndex].words)
+                    Text(verbatim: originalLyric.words)
                 }
             }
         } else {

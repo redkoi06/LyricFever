@@ -309,7 +309,8 @@ import MediaRemoteAdapter
         
         coreDataContainer.loadPersistentStores { description, error in
             if let error = error {
-                fatalError("Error: \(error.localizedDescription)")
+                print("[LyricFever][CoreData] persistent store failed to load: \(error.localizedDescription)")
+                return
             }
             self.coreDataContainer.viewContext.mergePolicy = NSMergePolicy.overwrite
         }
@@ -409,9 +410,6 @@ import MediaRemoteAdapter
         guard let finalLyrics = await self.fetch(for: currentlyPlaying, currentlyPlayingName, checkCoreDataFirst: false) else {
             print("Refresh Lyrics: Failed to run network fetch")
             return
-        }
-        if finalLyrics.isEmpty {
-            currentlyPlayingLyricsIndex = nil
         }
         setNewLyricsColorTranslationRomanizationAndStartUpdater(with: finalLyrics)
 //        currentlyPlayingLyrics = finalLyrics
@@ -1019,7 +1017,18 @@ import MediaRemoteAdapter
     #endif
 
     func upcomingIndex(_ currentTime: Double) -> Int? {
+        guard !currentlyPlayingLyrics.isEmpty else {
+            currentlyPlayingLyricsIndex = nil
+            spotifySyncLog("upcomingIndex nil: lyrics array is empty")
+            return nil
+        }
+
         if let currentlyPlayingLyricsIndex {
+            guard currentlyPlayingLyrics.indices.contains(currentlyPlayingLyricsIndex) else {
+                spotifySyncLog("upcomingIndex recovered invalid index=\(currentlyPlayingLyricsIndex) lyricsCount=\(currentlyPlayingLyrics.count)")
+                self.currentlyPlayingLyricsIndex = nil
+                return currentlyPlayingLyrics.firstIndex(where: { $0.startTimeMS > currentTime })
+            }
             let newIndex = currentlyPlayingLyricsIndex + 1
             if newIndex >= currentlyPlayingLyrics.count {
                 print("REACHED LAST LYRIC!!!!!!!!")
@@ -1070,7 +1079,17 @@ import MediaRemoteAdapter
             self.currentTime = CurrentTimeWithStoredDate(currentTime: currentTime)
             print("next time: \(nextTimestamp)")
             print("the difference is \(diff)")
-            try await Task.sleep(nanoseconds: UInt64(1000000*diff))
+            guard diff.isFinite else {
+                spotifySyncLog("lyricUpdater stopping: non-finite timestamp difference current=\(currentTime) next=\(nextTimestamp)")
+                stopLyricUpdater()
+                return
+            }
+            if diff <= 0 {
+                spotifySyncLog("lyricUpdater recovered non-positive timestamp difference=\(diff) index=\(lastIndex)")
+                currentlyPlayingLyricsIndex = lastIndex
+                continue
+            }
+            try await Task.sleep(nanoseconds: UInt64(min(diff * 1_000_000, Double(UInt64.max))))
             print("lyrics exist: \(!currentlyPlayingLyrics.isEmpty)")
             print("last index: \(lastIndex)")
             print("currently playing lryics index: \(currentlyPlayingLyricsIndex)")
@@ -1348,6 +1367,11 @@ import MediaRemoteAdapter
     #if os(macOS)
     func setNewLyricsColorTranslationRomanizationAndStartUpdater(with newLyrics: [LyricLine]) {
         spotifySyncLog("setNewLyrics count=\(newLyrics.count) trackID=\(currentlyPlaying ?? "nil") isPlaying=\(isPlaying)")
+        stopLyricUpdater()
+        currentlyPlayingLyricsIndex = nil
+        translatedLyric = []
+        romanizedLyrics = []
+        chineseConversionLyrics = []
         currentlyPlayingLyrics = newLyrics
         if currentPlayer == .spotify, !newLyrics.isEmpty {
             resetSpotifyEmptyLyricsRetry()
