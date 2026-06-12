@@ -131,6 +131,8 @@ LyricFever/Views/KaraokeView/KaraokeView.swift
 - Karaoke 可通过 `karaokeShowRomanization` 独立控制是否在原文下显示罗马音。
 - 全屏 AppKit 列表的延迟滚动回调必须校验 `updateRevision`，旧歌曲回调不得消费新歌曲的首次定位状态。
 - `currentlyPlayingLyricsIndex` 超出新歌词数组范围时应按 `nil` 处理，避免全部歌词被误判为过去行并变为透明。
+- Apple Music 单曲循环不会改变 persistent ID，必须由 watchdog 检测播放位置回绕，清空旧的末句索引并重启歌词 updater。
+- 同一首歌回绕导致歌词索引从末句重置为 `nil` 时，全屏 AppKit 列表也必须重新预定位到首句，不能保留末尾滚动位置。
 
 ## 已知行为与暂未修改项
 

@@ -200,10 +200,13 @@ import MediaRemoteAdapter
     private var currentLyricsUpdaterTask: Task<Void,Error>?
     private var currentLyricsDriftFix: Task<Void,Error>?
     private var currentArtworkFetchTask: Task<Void, Never>?
+    private var currentAppleMusicWatchdogTask: Task<Void, Never>?
     private var currentSpotifyWatchdogTask: Task<Void, Never>?
     private var currentSpotifyEmptyLyricsRetryTask: Task<Void, Never>?
     private var currentRomanizationTask: Task<Void, Never>?
     private var spotifyEmptyLyricsRetryCount = 0
+    private var lastAppleMusicWatchdogTrackID: String?
+    private var lastAppleMusicWatchdogPosition: TimeInterval?
     private var lastSpotifyWatchdogTrackID: String?
     private var lastSpotifyWatchdogPosition: TimeInterval?
     private let spotifyEmptyLyricsRetryLimit = 2
@@ -645,6 +648,7 @@ import MediaRemoteAdapter
         guard currentPlayer == .appleMusic else {
             return
         }
+        ensureAppleMusicWatchdog()
         if notification.userInfo?["Player State"] as? String == "Playing" {
             print("is playing")
             isPlaying = true
@@ -812,6 +816,91 @@ import MediaRemoteAdapter
         currentSpotifyEmptyLyricsRetryTask?.cancel()
         currentSpotifyEmptyLyricsRetryTask = nil
         spotifyEmptyLyricsRetryCount = 0
+    }
+
+    private func ensureAppleMusicWatchdog() {
+        guard currentPlayer == .appleMusic else {
+            currentAppleMusicWatchdogTask?.cancel()
+            currentAppleMusicWatchdogTask = nil
+            return
+        }
+        guard currentAppleMusicWatchdogTask == nil else {
+            return
+        }
+        currentAppleMusicWatchdogTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if Task.isCancelled {
+                    break
+                }
+                self.appleMusicWatchdogTick()
+            }
+        }
+    }
+
+    private func appleMusicWatchdogTick() {
+        guard currentPlayer == .appleMusic else {
+            currentAppleMusicWatchdogTask?.cancel()
+            currentAppleMusicWatchdogTask = nil
+            return
+        }
+        guard appleMusicPlayer.isRunning else {
+            return
+        }
+
+        let trackID = appleMusicPlayer.persistentID
+        let position = appleMusicPlayer.currentTime
+        let playerIsPlaying = appleMusicPlayer.isPlaying
+        isPlaying = playerIsPlaying
+
+        guard playerIsPlaying else {
+            lastAppleMusicWatchdogTrackID = trackID
+            lastAppleMusicWatchdogPosition = position
+            return
+        }
+
+        if let position {
+            currentTime = CurrentTimeWithStoredDate(currentTime: position)
+        }
+
+        let positionJumpedBackward: Bool
+        if lastAppleMusicWatchdogTrackID == trackID,
+           let previousPosition = lastAppleMusicWatchdogPosition,
+           let position {
+            positionJumpedBackward = previousPosition > 10_000
+                && position + 5_000 < previousPosition
+        } else {
+            positionJumpedBackward = false
+        }
+
+        let lyricIndexIsAheadOfPlayback: Bool
+        if let index = currentlyPlayingLyricsIndex,
+           currentlyPlayingLyrics.indices.contains(index),
+           let position {
+            lyricIndexIsAheadOfPlayback = position + 1_000
+                < currentlyPlayingLyrics[index].startTimeMS
+        } else {
+            lyricIndexIsAheadOfPlayback = false
+        }
+
+        if lastAppleMusicWatchdogTrackID == trackID,
+           !currentlyPlayingLyrics.isEmpty,
+           positionJumpedBackward || lyricIndexIsAheadOfPlayback {
+            let previousDescription = lastAppleMusicWatchdogPosition.map { String($0) } ?? "nil"
+            let positionDescription = position.map { String($0) } ?? "nil"
+            let indexDescription = currentlyPlayingLyricsIndex.map { String($0) } ?? "nil"
+            print("[LyricFever][AppleMusicSync] position reset detected "
+                  + "previous=\(previousDescription) "
+                  + "current=\(positionDescription) "
+                  + "index=\(indexDescription)")
+            currentlyPlayingLyricsIndex = nil
+            if showLyrics, userDefaultStorage.hasOnboarded {
+                startLyricUpdater()
+            }
+        }
+
+        lastAppleMusicWatchdogTrackID = trackID
+        lastAppleMusicWatchdogPosition = position
     }
 
     private func ensureSpotifyWatchdog() {
@@ -1456,8 +1545,11 @@ import MediaRemoteAdapter
             isPlaying = true
         }
         setCurrentProperties()
-        if currentPlayer == .spotify {
-            ensureSpotifyWatchdog()
+        switch currentPlayer {
+            case .appleMusic:
+                ensureAppleMusicWatchdog()
+            case .spotify:
+                ensureSpotifyWatchdog()
         }
         startLyricUpdater()
     }

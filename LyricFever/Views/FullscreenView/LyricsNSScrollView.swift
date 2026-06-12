@@ -368,12 +368,17 @@ struct LyricsNSScrollView: NSViewRepresentable {
 
         let lyricsChanged      = lyrics != c.prevLyrics
         let indexBecameValid   = c.prevIndexWasNil && focusedIndex != nil
+        let indexResetForReplay = c.prevIndex != nil && focusedIndex == nil
         let suppressAnimations = lyricsChanged || indexBecameValid
 
         if lyricsChanged {
             c.prevLyrics = lyrics
             c.pendingPrePosition = true    // arm the one-shot pre-position
             rebuildCells(coordinator: c, focusedIndex: focusedIndex)
+        } else if indexResetForReplay {
+            // Apple Music repeat-one keeps the same track and lyrics. When playback
+            // wraps to the beginning, pre-position the list just like a new song.
+            c.pendingPrePosition = true
         }
 
         let needsRefresh = lyricsChanged
