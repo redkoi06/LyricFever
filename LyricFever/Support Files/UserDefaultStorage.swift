@@ -45,6 +45,8 @@ class UserDefaultStorage {
 //    var karaokeUseAlbumColor: Bool = true
     @ObservableUserDefault(.init(key: "karaokeShowMultilingual", defaultValue: true, store: .standard))
     @ObservationIgnored var karaokeShowMultilingual: Bool
+    @ObservableUserDefault(.init(key: "karaokeShowRomanization", defaultValue: false, store: .standard))
+    @ObservationIgnored var karaokeShowRomanization: Bool
     @ObservableUserDefault(.init(key: "karaokeTransparency", defaultValue: 50, store: .standard))
     @ObservationIgnored var karaokeTransparency: Double
 //    var fixedKaraokeColorHex: String = "#2D3CCC"

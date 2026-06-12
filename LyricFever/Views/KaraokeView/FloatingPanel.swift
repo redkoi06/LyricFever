@@ -11,7 +11,7 @@ import SwiftUI
 
 extension View {
     func floatingPanel<Content: View>(isPresented: Binding<Bool>,
-                                      contentRect: CGRect = CGRect(x: 0, y: 0, width: 800, height: 100),
+                                      contentRect: CGRect = CGRect(x: 0, y: 0, width: 800, height: 130),
                                       @ViewBuilder content: @escaping () -> Content) -> some View {
         self.modifier(FloatingPanelModifier(isPresented: isPresented, contentRect: contentRect, view: content))
     }

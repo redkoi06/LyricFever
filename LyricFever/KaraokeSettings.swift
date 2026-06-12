@@ -16,6 +16,7 @@ struct KaraokeSettingsView: View {
     @AppStorage("fixedKaraokeColorHex") var fixedKaraokeColorHex: String = "#2D3CCC"
     @AppStorage("karaokeModeHoveringSetting") var karaokeModeHoveringSetting: Bool = false
     @AppStorage("karaokeShowMultilingual") var karaokeShowMultilingual: Bool = true
+    @AppStorage("karaokeShowRomanization") var karaokeShowRomanization: Bool = false
     @AppStorage("karaokeTransparency") var karaokeTransparency: Double = 50
     
     var colorBinding: Binding<Color> {
@@ -37,6 +38,10 @@ struct KaraokeSettingsView: View {
             .toggleStyle(.checkbox)
             Toggle(isOn: $karaokeShowMultilingual) {
                 Text("Show multilingual lyrics when translating in Karaoke window")
+            }
+            .toggleStyle(.checkbox)
+            Toggle(isOn: $karaokeShowRomanization) {
+                Text("Show romanization below lyrics in Karaoke window")
             }
             .toggleStyle(.checkbox)
             .padding(.bottom, 20)
@@ -74,6 +79,7 @@ struct KaraokeSettingsView: View {
                 viewmodel.userDefaultStorage.karaokeModeHoveringSetting = false
                 karaokeUseAlbumColor = true
                 viewmodel.userDefaultStorage.karaokeShowMultilingual = true
+                viewmodel.userDefaultStorage.karaokeShowRomanization = false
                 viewmodel.userDefaultStorage.karaokeTransparency = 50
                 viewmodel.karaokeFont = NSFont.boldSystemFont(ofSize: 30)
 //                viewmodel.karaokeFontSize = 30

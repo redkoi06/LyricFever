@@ -202,6 +202,7 @@ import MediaRemoteAdapter
     private var currentArtworkFetchTask: Task<Void, Never>?
     private var currentSpotifyWatchdogTask: Task<Void, Never>?
     private var currentSpotifyEmptyLyricsRetryTask: Task<Void, Never>?
+    private var currentRomanizationTask: Task<Void, Never>?
     private var spotifyEmptyLyricsRetryCount = 0
     private var lastSpotifyWatchdogTrackID: String?
     private var lastSpotifyWatchdogPosition: TimeInterval?
@@ -532,24 +533,52 @@ import MediaRemoteAdapter
     }
     
     func romanizeDidChange() {
-        if userDefaultStorage.romanize {
-            // Generate romanized lyrics from chinese conversion
-            if !chineseConversionLyrics.isEmpty {
-                print("Romanized Lyrics generated from romanize value change for song \(String(describing: currentlyPlaying)) with chinese conversion")
-                romanizedLyrics = chineseConversionLyrics.compactMap({
-                    RomanizerService.generateRomanizedLyric(LyricLine(startTime: 0, words: $0))
-                })
-            // Generate romanized lyrics from original lyrics
-            } else {
-                print("Romanized Lyrics generated from romanize value change for song \(String(describing: currentlyPlaying))")
-                romanizedLyrics = currentlyPlayingLyrics.compactMap({
-                    RomanizerService.generateRomanizedLyric($0)
-                })
-            }
-            
-//            romanizeMetadata()
-        } else {
+        if romanizedLyrics.count != currentlyPlayingLyrics.count {
+            regenerateRomanizedLyrics()
+        }
+    }
+
+    func romanizedLyric(at index: Int) -> String? {
+        guard let lyric = romanizedLyrics[safe: index], !lyric.isEmpty else {
+            return nil
+        }
+        return lyric
+    }
+
+    private func resetRomanization() {
+        currentRomanizationTask?.cancel()
+        currentRomanizationTask = nil
+        romanizedLyrics = []
+    }
+
+    private func regenerateRomanizedLyrics() {
+        currentRomanizationTask?.cancel()
+
+        let trackID = currentlyPlaying
+        let lyricsSnapshot = currentlyPlayingLyrics
+        let sourceLyrics = lyricsSnapshot.map(\.words)
+
+        guard !sourceLyrics.isEmpty else {
             romanizedLyrics = []
+            currentRomanizationTask = nil
+            return
+        }
+
+        romanizedLyrics = Array(repeating: "", count: lyricsSnapshot.count)
+        currentRomanizationTask = Task {
+            let generated = await Task.detached(priority: .userInitiated) {
+                RomanizerService.generateRomanizedLyrics(sourceLyrics)
+            }.value
+
+            guard !Task.isCancelled,
+                  self.currentlyPlaying == trackID,
+                  self.currentlyPlayingLyrics == lyricsSnapshot,
+                  generated.count == lyricsSnapshot.count else {
+                return
+            }
+
+            self.romanizedLyrics = generated
+            self.currentRomanizationTask = nil
         }
     }
     
@@ -580,26 +609,28 @@ import MediaRemoteAdapter
         if let chinesePreference = ChineseConversion(rawValue: userDefaultStorage.chinesePreference), chinesePreference != .none {
             print("Generating Chinese conversion for song \(String(describing: currentlyPlaying)) to chinese style \(chinesePreference.description)")
             //TODO: check if Task was cancelled
-            let chineseConversionLyrics: [String] = currentlyPlayingLyrics.compactMap({
+            let chineseConversionLyrics: [String] = currentlyPlayingLyrics.map({
                 switch chinesePreference {
                     case .none:
-                        return nil
+                        return $0.words
                     case .simplified:
-                        return RomanizerService.generateMainlandTransliteration($0)
+                        return RomanizerService.generateMainlandTransliteration($0) ?? $0.words
                     case .traditionalNeutral:
-                        return RomanizerService.generateTraditionalNeutralTransliteration($0)
+                        return RomanizerService.generateTraditionalNeutralTransliteration($0) ?? $0.words
                     case .traditionalTaiwan:
-                        return RomanizerService.generateTaiwanTransliteration($0)
+                        return RomanizerService.generateTaiwanTransliteration($0) ?? $0.words
                     case .traditionalHK:
-                        return RomanizerService.generateHongKongTransliteration($0)
+                        return RomanizerService.generateHongKongTransliteration($0) ?? $0.words
                 }
             })
             //TODO: check if Task was cancelled
             if !Task.isCancelled {
                 self.chineseConversionLyrics = chineseConversionLyrics
+                regenerateRomanizedLyrics()
             }
         } else {
             chineseConversionLyrics = []
+            regenerateRomanizedLyrics()
         }
     }
     
@@ -771,7 +802,7 @@ import MediaRemoteAdapter
         currentlyPlayingLyricsIndex = nil
         currentlyPlayingLyrics = []
         translatedLyric = []
-        romanizedLyrics = []
+        resetRomanization()
         chineseConversionLyrics = []
         lyricsIsEmptyPostLoad = false
         isFetching = true
@@ -941,7 +972,7 @@ import MediaRemoteAdapter
             currentlyPlayingLyricsIndex = nil
             currentlyPlayingLyrics = []
             translatedLyric = []
-            romanizedLyrics = []
+            resetRomanization()
             chineseConversionLyrics = []
         }
 
@@ -1300,7 +1331,7 @@ import MediaRemoteAdapter
             currentlyPlayingLyricsIndex = nil
             currentlyPlayingLyrics = []
             translatedLyric = []
-            romanizedLyrics = []
+            resetRomanization()
             chineseConversionLyrics = []
             lyricsIsEmptyPostLoad = true
         } catch {
@@ -1370,7 +1401,7 @@ import MediaRemoteAdapter
         stopLyricUpdater()
         currentlyPlayingLyricsIndex = nil
         translatedLyric = []
-        romanizedLyrics = []
+        resetRomanization()
         chineseConversionLyrics = []
         currentlyPlayingLyrics = newLyrics
         if currentPlayer == .spotify, !newLyrics.isEmpty {
@@ -1379,10 +1410,7 @@ import MediaRemoteAdapter
         setBackgroundColor()
         fetchTranslationSourceLanguage()
         let _ = reloadTranslationConfigIfTranslating()
-//        romanizeDidChange()
         chinesePreferenceDidChange()
-        // we romanize afterwards, in-case the chinese conversion array was populated
-        romanizeDidChange()
         lyricsIsEmptyPostLoad = currentlyPlayingLyrics.isEmpty
         spotifySyncLog("setNewLyrics done lyricsCount=\(currentlyPlayingLyrics.count) emptyPostLoad=\(lyricsIsEmptyPostLoad)")
         if isPlaying, !currentlyPlayingLyrics.isEmpty, showLyrics, userDefaultStorage.hasOnboarded {

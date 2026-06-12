@@ -14,9 +14,11 @@ import SwiftUI
 // MARK: - Constants / font helpers
 
 private let primaryFont     = NSFont.boldSystemFont(ofSize: 40)
-private let translationFont = NSFont.systemFont(ofSize: 33, weight: .semibold)
+private let romanizationFont = NSFont.systemFont(ofSize: 24, weight: .semibold)
+private let translationFont = NSFont.systemFont(ofSize: 30, weight: .semibold)
 private let cellPad:     CGFloat = 20
-private let labelGap:    CGFloat = 3
+private let romanizationGap: CGFloat = 4
+private let translationGap: CGFloat = 8
 private let trailInset:  CGFloat = 100
 
 /// Height of a single wrapped text block at a given width.
@@ -31,12 +33,20 @@ private func textHeight(_ text: String, font: NSFont, width: CGFloat) -> CGFloat
 }
 
 /// Total height for one lyric cell at the given cell width.
-private func rowHeight(primary: String, translation: String?, cellWidth: CGFloat) -> CGFloat {
+private func rowHeight(
+    primary: String,
+    romanization: String?,
+    translation: String?,
+    cellWidth: CGFloat
+) -> CGFloat {
     let textW = cellWidth - 2 * cellPad
     guard textW > 0 else { return cellPad * 2 + 50 }
     var h = textHeight(primary, font: primaryFont, width: textW) + 2 * cellPad
+    if let romanization, !romanization.isEmpty {
+        h += textHeight(romanization, font: romanizationFont, width: textW) + romanizationGap
+    }
     if let t = translation, !t.isEmpty {
-        h += textHeight(t, font: translationFont, width: textW) + labelGap
+        h += textHeight(t, font: translationFont, width: textW) + translationGap
     }
     return max(h, 50)
 }
@@ -48,6 +58,7 @@ class LyricCellView: NSView {
     // This prevents NSTextField from creating internal "content size" constraints
     // whose constant changes would propagate to SwiftUI's hosting view and loop.
     let primaryLabel     = NSTextField(labelWithString: "")
+    let romanizationLabel = NSTextField(labelWithString: "")
     let translationLabel = NSTextField(labelWithString: "")
 
     private var lastIsCurrentLine: Bool = false
@@ -59,7 +70,7 @@ class LyricCellView: NSView {
         super.init(frame: frame)
         wantsLayer = true
         layer?.masksToBounds = false
-        for label in [primaryLabel, translationLabel] {
+        for label in [primaryLabel, romanizationLabel, translationLabel] {
             label.isBezeled      = false
             label.drawsBackground = false
             label.isEditable     = false
@@ -72,8 +83,10 @@ class LyricCellView: NSView {
             addSubview(label)
         }
         primaryLabel.font     = primaryFont
+        romanizationLabel.font = romanizationFont
+        romanizationLabel.alphaValue = 0.82
         translationLabel.font = translationFont
-        translationLabel.alphaValue = 0.85
+        translationLabel.alphaValue = 0.78
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -88,22 +101,36 @@ class LyricCellView: NSView {
         let ph = textHeight(primaryLabel.stringValue, font: primaryFont, width: textW)
         primaryLabel.frame = NSRect(x: cellPad, y: y, width: textW, height: ph)
         y += ph
+        if !romanizationLabel.isHidden, !romanizationLabel.stringValue.isEmpty {
+            y += romanizationGap
+            let rh = textHeight(romanizationLabel.stringValue, font: romanizationFont, width: textW)
+            romanizationLabel.frame = NSRect(x: cellPad, y: y, width: textW, height: rh)
+            y += rh
+        }
         if !translationLabel.isHidden, !translationLabel.stringValue.isEmpty {
-            y += labelGap
+            y += translationGap
             let th = textHeight(translationLabel.stringValue, font: translationFont, width: textW)
             translationLabel.frame = NSRect(x: cellPad, y: y, width: textW, height: th)
         }
     }
 
-    func configure(primaryText: String, translationText: String?,
+    func configure(primaryText: String, romanizationText: String?, translationText: String?,
                    isCurrentLine: Bool, isLastLine: Bool, isPastLine: Bool,
                    blurRadius: CGFloat, animationDelay: Double = 0,
                    skipAnimations: Bool = false) {
         primaryLabel.stringValue = primaryText
+        if let romanizationText, !romanizationText.isEmpty {
+            romanizationLabel.stringValue = romanizationText
+            romanizationLabel.isHidden = false
+        } else {
+            romanizationLabel.stringValue = ""
+            romanizationLabel.isHidden = true
+        }
         if let t = translationText, !t.isEmpty {
             translationLabel.stringValue = t
             translationLabel.isHidden = false
         } else {
+            translationLabel.stringValue = ""
             translationLabel.isHidden = true
         }
 
@@ -206,6 +233,7 @@ class LyricsDocumentView: NSView {
         for cell in lyricViews {
             let h = rowHeight(
                 primary:     cell.primaryLabel.stringValue,
+                romanization: cell.romanizationLabel.isHidden ? nil : cell.romanizationLabel.stringValue,
                 translation: cell.translationLabel.isHidden ? nil : cell.translationLabel.stringValue,
                 cellWidth:   w)
             cell.frame = NSRect(x: 0, y: y, width: w, height: h)
@@ -220,6 +248,7 @@ class LyricsDocumentView: NSView {
         for cell in lyricViews {
             h += rowHeight(
                 primary:     cell.primaryLabel.stringValue,
+                romanization: cell.romanizationLabel.isHidden ? nil : cell.romanizationLabel.stringValue,
                 translation: cell.translationLabel.isHidden ? nil : cell.translationLabel.stringValue,
                 cellWidth:   w)
         }
@@ -260,6 +289,8 @@ struct LyricsNSScrollView: NSViewRepresentable {
         var prevTranslated:        [String]     = []
         var prevBlur:              Bool         = false
         var prevPadding:           CGFloat      = 0
+        /// Invalidates deferred scroll work from earlier SwiftUI update passes.
+        var updateRevision:        UInt         = 0
         /// Set when lyrics change so only the first async fires the pre-position logic.
         var pendingPrePosition:    Bool         = false
 
@@ -325,6 +356,9 @@ struct LyricsNSScrollView: NSViewRepresentable {
 
     func updateNSView(_ nsView: NonScrollableScrollView, context: Context) {
         let c = context.coordinator
+        c.updateRevision &+= 1
+        let updateRevision = c.updateRevision
+        let focusedIndex = currentIndex.flatMap { lyrics.indices.contains($0) ? $0 : nil }
 
         if padding != c.prevPadding {
             c.prevPadding = padding
@@ -333,33 +367,37 @@ struct LyricsNSScrollView: NSViewRepresentable {
         }
 
         let lyricsChanged      = lyrics != c.prevLyrics
-        let indexBecameValid   = c.prevIndexWasNil && currentIndex != nil
+        let indexBecameValid   = c.prevIndexWasNil && focusedIndex != nil
         let suppressAnimations = lyricsChanged || indexBecameValid
 
         if lyricsChanged {
             c.prevLyrics = lyrics
             c.pendingPrePosition = true    // arm the one-shot pre-position
-            rebuildCells(coordinator: c)   // always instant inside rebuildCells
+            rebuildCells(coordinator: c, focusedIndex: focusedIndex)
         }
 
         let needsRefresh = lyricsChanged
-            || currentIndex         != c.prevIndex
+            || focusedIndex         != c.prevIndex
             || romanizedLyrics      != c.prevRomanized
             || chineseConversionLyrics != c.prevChinese
             || translatedLyric      != c.prevTranslated
             || blurFullscreen       != c.prevBlur
         
         // Capture before prevIndex is updated so we know if the index itself moved.
-        let indexJustChanged = currentIndex != c.prevIndex && currentIndex != nil
+        let indexJustChanged = focusedIndex != c.prevIndex && focusedIndex != nil
 
         if needsRefresh {
-            c.prevIndex             = currentIndex
-            c.prevIndexWasNil       = currentIndex == nil
+            c.prevIndex             = focusedIndex
+            c.prevIndexWasNil       = focusedIndex == nil
             c.prevRomanized         = romanizedLyrics
             c.prevChinese           = chineseConversionLyrics
             c.prevTranslated        = translatedLyric
             c.prevBlur              = blurFullscreen
-            refreshCells(coordinator: c, animated: !suppressAnimations)
+            refreshCells(
+                coordinator: c,
+                focusedIndex: focusedIndex,
+                animated: !suppressAnimations
+            )
         }
 
         // Sync document frame (content height may have changed).
@@ -368,14 +406,17 @@ struct LyricsNSScrollView: NSViewRepresentable {
         // For layout-only changes (romanization / translation toggle) correct the scroll
         // position synchronously — before AppKit renders — so the user never sees a jump.
         let layoutOnlyChange = needsRefresh && !indexJustChanged && !lyricsChanged
-        if layoutOnlyChange, let idx = currentIndex {
+        if layoutOnlyChange, let idx = focusedIndex {
             c.documentView.layoutSubtreeIfNeeded()
             scrollToCenter(coordinator: c, index: idx, animated: false)
         }
 
         // Scroll after layout has settled.
-        let targetIndex = currentIndex
+        let targetIndex = focusedIndex
         DispatchQueue.main.async { [c] in
+            guard c.updateRevision == updateRevision else {
+                return
+            }
             c.syncDocumentFrame()   // re-check now that real dimensions are known
             if let idx = targetIndex {
                 // A lyric is active — clear any pending pre-position and scroll to it.
@@ -397,15 +438,18 @@ struct LyricsNSScrollView: NSViewRepresentable {
                 guard docW > 0 else { return }
 
                 let first = self.lyrics[0]
-                let primaryText: String
-                if !self.romanizedLyrics.isEmpty              { primaryText = self.romanizedLyrics[0] }
-                else if !self.chineseConversionLyrics.isEmpty { primaryText = self.chineseConversionLyrics[0] }
-                else                                          { primaryText = first.words }
+                let primaryText = self.chineseConversionLyrics[safe: 0] ?? first.words
+                let romanization = self.romanizedLyrics[safe: 0].flatMap { $0.isEmpty ? nil : $0 }
                 let translation: String? = (
                     !self.translatedLyric.isEmpty
                     && first.words != self.translatedLyric[0]) ? self.translatedLyric[0] : nil
 
-                let firstH   = rowHeight(primary: primaryText, translation: translation, cellWidth: docW)
+                let firstH = rowHeight(
+                    primary: primaryText,
+                    romanization: romanization,
+                    translation: translation,
+                    cellWidth: docW
+                )
                 let cellMidY = dv.topPadding + firstH / 2
                 let visH     = sv.contentView.bounds.height
                 let anchor   = (visH - 150) / 2
@@ -419,28 +463,26 @@ struct LyricsNSScrollView: NSViewRepresentable {
 
     // MARK: Cell management
 
-    private func rebuildCells(coordinator: Coordinator) {
+    private func rebuildCells(coordinator: Coordinator, focusedIndex: Int?) {
         let dv = coordinator.documentView!
         for v in dv.lyricViews { v.removeFromSuperview() }
         dv.lyricViews = lyrics.map { _ in LyricCellView() }
         for v in dv.lyricViews { dv.addSubview(v) }
-        refreshCells(coordinator: coordinator, animated: false)
+        refreshCells(coordinator: coordinator, focusedIndex: focusedIndex, animated: false)
     }
 
-    private func refreshCells(coordinator: Coordinator, animated: Bool = true) {
+    private func refreshCells(
+        coordinator: Coordinator,
+        focusedIndex: Int?,
+        animated: Bool = true
+    ) {
         let count = lyrics.count
         for (i, view) in coordinator.documentView.lyricViews.enumerated() {
             guard i < count else { break }
             let element = lyrics[i]
 
-            let primary: String
-            if !romanizedLyrics.isEmpty, i < romanizedLyrics.count {
-                primary = romanizedLyrics[i]
-            } else if !chineseConversionLyrics.isEmpty, i < chineseConversionLyrics.count {
-                primary = chineseConversionLyrics[i]
-            } else {
-                primary = element.words
-            }
+            let primary = chineseConversionLyrics[safe: i] ?? element.words
+            let romanization = romanizedLyrics[safe: i].flatMap { $0.isEmpty ? nil : $0 }
 
             let translation: String?
             if !translatedLyric.isEmpty, i < translatedLyric.count,
@@ -450,17 +492,18 @@ struct LyricsNSScrollView: NSViewRepresentable {
                 translation = nil
             }
 
-            let isPastLine = currentIndex.map { i < $0 } ?? false
-            let distance   = currentIndex.map { abs(i - $0) } ?? 0
+            let isPastLine = focusedIndex.map { i < $0 } ?? false
+            let distance   = focusedIndex.map { abs(i - $0) } ?? 0
             let animDelay  = isPastLine ? 0 : min(Double(distance) * 0.05, 0.3)
 
             view.configure(
                 primaryText:     primary,
+                romanizationText: romanization,
                 translationText: translation,
-                isCurrentLine:   (i == currentIndex),
+                isCurrentLine:   (i == focusedIndex),
                 isLastLine:      (i == count - 1),
                 isPastLine:      isPastLine,
-                blurRadius:      blurFullscreen ? (currentIndex == nil ? 6.0 : min(CGFloat(distance) * 1.5, 6.0)) : 0.0,
+                blurRadius:      blurFullscreen ? (focusedIndex == nil ? 6.0 : min(CGFloat(distance) * 1.5, 6.0)) : 0.0,
                 animationDelay:  animDelay,
                 skipAnimations:  !animated)
         }

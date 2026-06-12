@@ -113,6 +113,25 @@ refreshLyrics
 ~/Library/Logs/DiagnosticReports/Retired/Lyric Fever-2026-06-10-233436.ips
 ```
 
+### 罗马音注音与全屏切歌定位
+
+主要修改位于：
+
+```text
+LyricFever/Services/RomanizerService/RomanizerService.swift
+LyricFever/ViewModel.swift
+LyricFever/Views/FullscreenView/LyricsNSScrollView.swift
+LyricFever/Views/KaraokeView/KaraokeView.swift
+```
+
+- 日语歌词使用 Mecab/IPADic 分词后生成带词间空格的罗马音，标点附着到前词。
+- 整首歌词复用一个 tokenizer，并在后台任务中生成；切歌时取消旧任务并校验 track ID。
+- `romanizedLyrics` 必须始终与 `currentlyPlayingLyrics` 等长，缺少注音的行使用空字符串占位，禁止使用 `compactMap`。
+- 全屏模式固定显示“原文、罗马音、翻译”三层结构，三层作为同一歌词单元参与高亮、模糊与滚动。
+- Karaoke 可通过 `karaokeShowRomanization` 独立控制是否在原文下显示罗马音。
+- 全屏 AppKit 列表的延迟滚动回调必须校验 `updateRevision`，旧歌曲回调不得消费新歌曲的首次定位状态。
+- `currentlyPlayingLyricsIndex` 超出新歌词数组范围时应按 `nil` 处理，避免全部歌词被误判为过去行并变为透明。
+
 ## 已知行为与暂未修改项
 
 - 菜单窗口中的“大小”滑块并不是 Karaoke/歌词弹幕字体大小。

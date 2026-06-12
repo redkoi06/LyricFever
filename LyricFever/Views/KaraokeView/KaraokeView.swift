@@ -31,27 +31,32 @@ struct KaraokeView: View {
     @Environment(ViewModel.self) var viewmodel
     @AppStorage("karaokeTransparency") var karaokeTransparency: Double = 50
     @AppStorage("karaokeShowMultilingual") var karaokeShowMultilingual: Bool = true
+    @AppStorage("karaokeShowRomanization") var karaokeShowRomanization: Bool = false
     @AppStorage("karaokeUseAlbumColor") var karaokeUseAlbumColor: Bool = true
     @AppStorage("fixedKaraokeColorHex") var fixedKaraokeColorHex: String = "#2D3CCC"
     
-    func currentWords(for currentlyPlayingLyricsIndex: Int) -> String? {
-        if let romanizedLyric = viewmodel.romanizedLyrics[safe: currentlyPlayingLyricsIndex] {
-            return romanizedLyric
-        } else if let convertedLyric = viewmodel.chineseConversionLyrics[safe: currentlyPlayingLyricsIndex] {
+    func primaryWords(for currentlyPlayingLyricsIndex: Int) -> String? {
+        if let convertedLyric = viewmodel.chineseConversionLyrics[safe: currentlyPlayingLyricsIndex] {
             return convertedLyric
-        } else {
-            return viewmodel.currentlyPlayingLyrics[safe: currentlyPlayingLyricsIndex]?.words
         }
+        return viewmodel.currentlyPlayingLyrics[safe: currentlyPlayingLyricsIndex]?.words
     }
     
-    func multilingualView(_ currentlyPlayingLyricsIndex: Int) -> some View {
-        VStack(spacing: 6) {
-            Text(verbatim: currentWords(for: currentlyPlayingLyricsIndex) ?? "")
-                
-//            Text(verbatim: viewmodel.romanizedLyrics.isEmpty ? viewmodel.currentlyPlayingLyrics[currentlyPlayingLyricsIndex].words : viewmodel.romanizedLyrics[currentlyPlayingLyricsIndex])
-            Text(verbatim: viewmodel.translatedLyric[safe: currentlyPlayingLyricsIndex] ?? "")
-                .font(.custom(viewmodel.karaokeFont.fontName, size: 0.9*(viewmodel.karaokeFont.pointSize)))
-                .opacity(0.85)
+    @ViewBuilder
+    func annotatedOriginal(_ currentlyPlayingLyricsIndex: Int, translation: String? = nil) -> some View {
+        VStack(spacing: 4) {
+            Text(verbatim: primaryWords(for: currentlyPlayingLyricsIndex) ?? "")
+            if karaokeShowRomanization,
+               let romanizedLyric = viewmodel.romanizedLyric(at: currentlyPlayingLyricsIndex) {
+                Text(verbatim: romanizedLyric)
+                    .font(.custom(viewmodel.karaokeFont.fontName, size: 0.7 * viewmodel.karaokeFont.pointSize))
+                    .opacity(0.82)
+            }
+            if let translation {
+                Text(verbatim: translation)
+                    .font(.custom(viewmodel.karaokeFont.fontName, size: 0.82 * viewmodel.karaokeFont.pointSize))
+                    .opacity(0.78)
+            }
         }
     }
     
@@ -66,22 +71,16 @@ struct KaraokeView: View {
     @ViewBuilder
     func lyricsView() -> some View {
         if let currentlyPlayingLyricsIndex = viewmodel.currentlyPlayingLyricsIndex,
-           let originalLyric = viewmodel.currentlyPlayingLyrics[safe: currentlyPlayingLyricsIndex] {
+           viewmodel.currentlyPlayingLyrics[safe: currentlyPlayingLyricsIndex] != nil {
             if let translatedLyric = viewmodel.translatedLyric[safe: currentlyPlayingLyricsIndex] {
                 if karaokeShowMultilingual, originalAndTranslationAreDifferent(for: currentlyPlayingLyricsIndex) {
-                    multilingualView(currentlyPlayingLyricsIndex)
+                    annotatedOriginal(currentlyPlayingLyricsIndex, translation: translatedLyric)
                 }
                 else {
                     Text(verbatim: translatedLyric)
                 }
             } else {
-                if let romanizedLyric = viewmodel.romanizedLyrics[safe: currentlyPlayingLyricsIndex] {
-                    Text(verbatim: romanizedLyric)
-                } else if let convertedLyric = viewmodel.chineseConversionLyrics[safe: currentlyPlayingLyricsIndex] {
-                    Text(verbatim: convertedLyric)
-                } else {
-                    Text(verbatim: originalLyric.words)
-                }
+                annotatedOriginal(currentlyPlayingLyricsIndex)
             }
         } else {
             Text("")
@@ -92,7 +91,7 @@ struct KaraokeView: View {
     var finalKaraokeView: some View {
         lyricsView()
             .id(viewmodel.currentlyPlayingLyricsIndex)
-            .lineLimit(2)
+            .lineLimit(3)
             .foregroundStyle(.white)
             .minimumScaleFactor(0.9)
             .font(.custom(viewmodel.karaokeFont.fontName, size: viewmodel.karaokeFont.pointSize))
@@ -114,7 +113,7 @@ struct KaraokeView: View {
                 }
             }
             .multilineTextAlignment(.center)
-            .frame(minWidth: 800, maxWidth: 800, minHeight: 100, maxHeight: 100, alignment: .center)
+            .frame(minWidth: 800, maxWidth: 800, minHeight: 130, maxHeight: 130, alignment: .center)
     }
     
     var currentAlbumArt: Color {

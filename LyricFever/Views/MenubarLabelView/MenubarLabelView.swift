@@ -29,7 +29,8 @@ struct MenubarLabelView: View {
                     return translatedLyric
                 } else {
                     // Attempt to display Romanization
-                    if let romanizedLyric = viewmodel.romanizedLyrics[safe: currentlyPlayingLyricsIndex] {
+                    if viewmodel.userDefaultStorage.romanize,
+                       let romanizedLyric = viewmodel.romanizedLyric(at: currentlyPlayingLyricsIndex) {
                         return romanizedLyric
                     } else if let convertedLyric = viewmodel.chineseConversionLyrics[safe: currentlyPlayingLyricsIndex] {
                         return convertedLyric
