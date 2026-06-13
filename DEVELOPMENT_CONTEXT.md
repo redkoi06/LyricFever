@@ -133,6 +133,7 @@ LyricFever/Views/KaraokeView/KaraokeView.swift
 - `currentlyPlayingLyricsIndex` 超出新歌词数组范围时应按 `nil` 处理，避免全部歌词被误判为过去行并变为透明。
 - Apple Music 单曲循环不会改变 persistent ID，必须由 watchdog 检测播放位置回绕，清空旧的末句索引并重启歌词 updater。
 - 同一首歌回绕导致歌词索引从末句重置为 `nil` 时，全屏 AppKit 列表也必须重新预定位到首句，不能保留末尾滚动位置。
+- Karaoke 悬浮窗在播放期间不能因当前歌词索引为空而关闭；索引无效、空白歌词或纯音乐符占位行统一显示 `music.note` 图标，避免空框或窗口消失。
 
 ## 已知行为与暂未修改项
 

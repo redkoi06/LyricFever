@@ -34,12 +34,39 @@ struct KaraokeView: View {
     @AppStorage("karaokeShowRomanization") var karaokeShowRomanization: Bool = false
     @AppStorage("karaokeUseAlbumColor") var karaokeUseAlbumColor: Bool = true
     @AppStorage("fixedKaraokeColorHex") var fixedKaraokeColorHex: String = "#2D3CCC"
+
+    private func displayableLyric(_ lyric: String?) -> String? {
+        guard let lyric else {
+            return nil
+        }
+        let trimmed = lyric.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+        let musicalPlaceholders = CharacterSet(charactersIn: "♪♫♩♬")
+        guard !trimmed.unicodeScalars.allSatisfy({
+            musicalPlaceholders.contains($0) || CharacterSet.whitespacesAndNewlines.contains($0)
+        }) else {
+            return nil
+        }
+        return trimmed
+    }
     
     func primaryWords(for currentlyPlayingLyricsIndex: Int) -> String? {
-        if let convertedLyric = viewmodel.chineseConversionLyrics[safe: currentlyPlayingLyricsIndex] {
+        if let convertedLyric = displayableLyric(
+            viewmodel.chineseConversionLyrics[safe: currentlyPlayingLyricsIndex]
+        ) {
             return convertedLyric
         }
-        return viewmodel.currentlyPlayingLyrics[safe: currentlyPlayingLyricsIndex]?.words
+        return displayableLyric(
+            viewmodel.currentlyPlayingLyrics[safe: currentlyPlayingLyricsIndex]?.words
+        )
+    }
+
+    var noLyricsView: some View {
+        Image(systemName: "music.note")
+            .font(.system(size: viewmodel.karaokeFont.pointSize, weight: .semibold))
+            .accessibilityLabel(Text("No lyrics"))
     }
     
     @ViewBuilder
@@ -72,18 +99,26 @@ struct KaraokeView: View {
     func lyricsView() -> some View {
         if let currentlyPlayingLyricsIndex = viewmodel.currentlyPlayingLyricsIndex,
            viewmodel.currentlyPlayingLyrics[safe: currentlyPlayingLyricsIndex] != nil {
-            if let translatedLyric = viewmodel.translatedLyric[safe: currentlyPlayingLyricsIndex] {
-                if karaokeShowMultilingual, originalAndTranslationAreDifferent(for: currentlyPlayingLyricsIndex) {
+            let primaryLyric = primaryWords(for: currentlyPlayingLyricsIndex)
+            let translatedLyric = displayableLyric(
+                viewmodel.translatedLyric[safe: currentlyPlayingLyricsIndex]
+            )
+            if let translatedLyric {
+                if primaryLyric != nil,
+                   karaokeShowMultilingual,
+                   originalAndTranslationAreDifferent(for: currentlyPlayingLyricsIndex) {
                     annotatedOriginal(currentlyPlayingLyricsIndex, translation: translatedLyric)
                 }
                 else {
                     Text(verbatim: translatedLyric)
                 }
-            } else {
+            } else if primaryLyric != nil {
                 annotatedOriginal(currentlyPlayingLyricsIndex)
+            } else {
+                noLyricsView
             }
         } else {
-            Text("")
+            noLyricsView
         }
     }
     
