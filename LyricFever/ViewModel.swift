@@ -405,7 +405,8 @@ import MediaRemoteAdapter
         // todo: romanize
         if currentPlayer == .appleMusic {
             print("Refresh Lyrics: Calling Apple Music Network fetch")
-            try await appleMusicNetworkFetch()
+            refreshAppleMusicMetadataFromPlayer()
+            await appleMusicStarter()
         }
         guard let currentlyPlaying, let currentlyPlayingName, let currentDuration = currentPlayerInstance.durationAsTimeInterval else {
             return
@@ -428,7 +429,7 @@ import MediaRemoteAdapter
         // we call this in self.fetch
 //        callColorDataServiceOnLyricColorOrArtwork(colorData: finalLyrics.colorData)
     }
-    
+
     func callColorDataServiceOnLyricColorOrArtwork(colorData: Int32?) {
         if currentPlayer == .appleMusic {
             if let currentlyPlaying, let backgroundColor = artworkImage?.findWhiteTextLegibleMostSaturatedDominantColor() {
@@ -649,7 +650,7 @@ import MediaRemoteAdapter
             return
         }
         ensureAppleMusicWatchdog()
-        if notification.userInfo?["Player State"] as? String == "Playing" {
+        if appleMusicPlayer.isPlaying {
             print("is playing")
             isPlaying = true
         } else {
@@ -657,27 +658,7 @@ import MediaRemoteAdapter
             isPlaying = false
             // manually cancels the lyric-updater task bc media is paused
         }
-        let currentlyPlayingName = (notification.userInfo?["Name"] as? String)
-        guard let currentlyPlayingName else {
-            self.currentlyPlayingName = nil
-            currentlyPlayingArtist = nil
-            currentAlbumName = nil
-            return
-        }
-        if currentlyPlayingName == "" {
-            self.currentlyPlayingName = nil
-            currentlyPlayingArtist = nil
-            currentAlbumName = nil
-        } else {
-            self.currentlyPlayingName = currentlyPlayingName
-            currentlyPlayingArtist = (notification.userInfo?["Artist"] as? String)
-            currentAlbumName = (notification.userInfo?["Album"] as? String)
-            if let duration = currentPlayerInstance.duration {
-                self.duration = duration
-            }
-            print("REOPEN: currentlyPlayingName is \(currentlyPlayingName)")
-            currentlyPlayingAppleMusicPersistentID = appleMusicPlayer.persistentID
-        }
+        refreshAppleMusicMetadataFromPlayer()
     }
     
     func spotifyPlaybackDidChange(_ notification: Notification) {
@@ -848,6 +829,7 @@ import MediaRemoteAdapter
             return
         }
 
+        refreshAppleMusicMetadataFromPlayer()
         let trackID = appleMusicPlayer.persistentID
         let position = appleMusicPlayer.currentTime
         let playerIsPlaying = appleMusicPlayer.isPlaying
@@ -901,6 +883,42 @@ import MediaRemoteAdapter
 
         lastAppleMusicWatchdogTrackID = trackID
         lastAppleMusicWatchdogPosition = position
+    }
+
+    @discardableResult
+    func refreshAppleMusicMetadataFromPlayer() -> Bool {
+        guard currentPlayer == .appleMusic,
+              let trackID = appleMusicPlayer.persistentID,
+              let trackName = appleMusicPlayer.trackName,
+              !trackName.isEmpty else {
+            return false
+        }
+
+        let artistName = appleMusicPlayer.artistName
+        let albumName = appleMusicPlayer.albumName
+        let trackChanged = currentlyPlayingAppleMusicPersistentID != trackID
+        let metadataChanged = currentlyPlayingName != trackName
+            || currentlyPlayingArtist != artistName
+            || currentAlbumName != albumName
+
+        if trackChanged {
+            currentAppleMusicFetchTask?.cancel()
+            currentlyPlaying = nil
+        }
+
+        currentlyPlayingName = trackName
+        currentlyPlayingArtist = artistName
+        currentAlbumName = albumName
+        if let duration = appleMusicPlayer.duration {
+            self.duration = duration
+        }
+        if trackChanged {
+            print("[LyricFever][AppleMusicSync] source track changed id=\(trackID) name=\(trackName)")
+            currentlyPlayingAppleMusicPersistentID = trackID
+        } else if metadataChanged {
+            print("[LyricFever][AppleMusicSync] corrected source metadata name=\(trackName)")
+        }
+        return trackChanged || metadataChanged
     }
 
     private func ensureSpotifyWatchdog() {
@@ -1562,8 +1580,19 @@ extension ViewModel {
     func appleMusicStarter() async {
         print("apple music test called again, cancelling previous")
         currentAppleMusicFetchTask?.cancel()
+        guard let expectedPersistentID = currentlyPlayingAppleMusicPersistentID,
+              let sourceTrackName = appleMusicPlayer.trackName,
+              let sourceArtistName = appleMusicPlayer.artistName else {
+            return
+        }
+        let sourceAlbumName = appleMusicPlayer.albumName
         let newFetchTask = Task {
-            try await self.appleMusicFetch()
+            try await self.appleMusicFetch(
+                expectedPersistentID: expectedPersistentID,
+                sourceTrackName: sourceTrackName,
+                sourceArtistName: sourceArtistName,
+                sourceAlbumName: sourceAlbumName
+            )
         }
         currentAppleMusicFetchTask = newFetchTask
         do {
@@ -1574,20 +1603,49 @@ extension ViewModel {
         }
     }
     
-    func appleMusicFetch() async throws {
+    func appleMusicFetch(
+        expectedPersistentID: String,
+        sourceTrackName: String,
+        sourceArtistName: String,
+        sourceAlbumName: String?
+    ) async throws {
+        let sourceFingerprint = appleMusicSourceFingerprint(
+            trackName: sourceTrackName,
+            artistName: sourceArtistName,
+            albumName: sourceAlbumName
+        )
         // check coredata for apple music persistent id -> spotify id mapping
-        if let coreDataSpotifyID = fetchSpotifyIDFromPersistentIDCoreData() {
+        if let coreDataSpotifyID = fetchSpotifyIDFromPersistentIDCoreData(
+            persistentID: expectedPersistentID,
+            sourceFingerprint: sourceFingerprint
+        ) {
             if !Task.isCancelled {
+                guard currentlyPlayingAppleMusicPersistentID == expectedPersistentID,
+                      appleMusicPlayer.persistentID == expectedPersistentID else {
+                    return
+                }
                 print("Apple Music CoreData Fetch: setting currentlyPlaying to \(coreDataSpotifyID)")
                 self.currentlyPlaying = coreDataSpotifyID
                 return
             }
         }
         print("Apple Music Fetch: No CoreData val. Fetching from network")
-        try await appleMusicNetworkFetch()
+        try await appleMusicNetworkFetch(
+            expectedPersistentID: expectedPersistentID,
+            sourceTrackName: sourceTrackName,
+            sourceArtistName: sourceArtistName,
+            sourceAlbumName: sourceAlbumName,
+            sourceFingerprint: sourceFingerprint
+        )
     }
-    
-    func appleMusicNetworkFetch() async throws {
+
+    func appleMusicNetworkFetch(
+        expectedPersistentID: String,
+        sourceTrackName: String,
+        sourceArtistName: String,
+        sourceAlbumName: String?,
+        sourceFingerprint: String
+    ) async throws {
         isFetching = true
 //        do {
 //            print("Apple Music Network Fetch: 3 second sleep")
@@ -1602,38 +1660,48 @@ extension ViewModel {
         // Task cancelled means we're working with old song data, so dont update Spotify ID with old song's ID
         
         // search for equivalent spotify song
-        if let spotifyResult = try await musicToSpotifyHelper() {
-            self.currentlyPlayingName = spotifyResult.SpotifyName
-            self.currentlyPlayingArtist = spotifyResult.SpotifyArtist
-            self.currentAlbumName = spotifyResult.SpotifyAlbum
+        if let spotifyResult = try await musicToSpotifyHelper(
+            sourceTrackName: sourceTrackName,
+            sourceArtistName: sourceArtistName,
+            sourceAlbumName: sourceAlbumName
+        ) {
+            try Task.checkCancellation()
+            guard currentlyPlayingAppleMusicPersistentID == expectedPersistentID,
+                  appleMusicPlayer.persistentID == expectedPersistentID else {
+                return
+            }
             self.currentlyPlaying = spotifyResult.SpotifyID
+            saveSpotifyMapping(
+                persistentID: expectedPersistentID,
+                spotifyID: spotifyResult.SpotifyID,
+                sourceFingerprint: sourceFingerprint
+            )
         } else {
             if let alternativeID = appleMusicPlayer.alternativeID, alternativeID != "" {
                 try Task.checkCancellation()
+                guard currentlyPlayingAppleMusicPersistentID == expectedPersistentID,
+                      appleMusicPlayer.persistentID == expectedPersistentID else {
+                    return
+                }
                 self.currentlyPlaying = alternativeID
             } else {
                 lyricsIsEmptyPostLoad = true
             }
         }
-        
-        
-        if let currentlyPlayingAppleMusicPersistentID, let currentlyPlaying {
-            print("Apple Music Network Fetch: Saving persistent id \(currentlyPlayingAppleMusicPersistentID) and spotify ID \(currentlyPlaying)")
-            // save the mapping into coredata persistentIDToSpotify
-            let newPersistentIDToSpotifyIDMapping = PersistentIDToSpotify(context: coreDataContainer.viewContext)
-            newPersistentIDToSpotifyIDMapping.persistentID = currentlyPlayingAppleMusicPersistentID
-            newPersistentIDToSpotifyIDMapping.spotifyID = currentlyPlaying
-            saveCoreData()
-        }
     }
     
-    func fetchSpotifyIDFromPersistentIDCoreData() -> String? {
-        let fetchRequest: NSFetchRequest<PersistentIDToSpotify> = PersistentIDToSpotify.fetchRequest()
-        guard let currentlyPlayingAppleMusicPersistentID else {
-            print("No persistent ID available. it's nil! should have never happened")
+    func fetchSpotifyIDFromPersistentIDCoreData(
+        persistentID: String,
+        sourceFingerprint: String
+    ) -> String? {
+        guard UserDefaults.standard.string(
+            forKey: appleMusicMappingFingerprintKey(persistentID: persistentID)
+        ) == sourceFingerprint else {
+            print("Apple Music CoreData Fetch: mapping fingerprint missing or stale for \(persistentID)")
             return nil
         }
-        fetchRequest.predicate = NSPredicate(format: "persistentID == %@", currentlyPlayingAppleMusicPersistentID) // Replace persistentID with the desired value
+        let fetchRequest: NSFetchRequest<PersistentIDToSpotify> = PersistentIDToSpotify.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "persistentID == %@", persistentID)
 
         do {
             let results = try coreDataContainer.viewContext.fetch(fetchRequest)
@@ -1651,13 +1719,83 @@ extension ViewModel {
         return nil
     }
     
-    private func musicToSpotifyHelper() async throws -> AppleMusicHelper? {
-        // Manually search song name, artist name
-        guard let currentlyPlayingArtist, let currentlyPlayingName else {
-            print("\(#function) currentlyPlayingName or currentlyPlayingArtist missing")
+    private func musicToSpotifyHelper(
+        sourceTrackName: String,
+        sourceArtistName: String,
+        sourceAlbumName: String?
+    ) async throws -> AppleMusicHelper? {
+        guard let result = try await spotifyLyricProvider.searchForTrackForAppleMusic(
+            artist: sourceArtistName,
+            track: sourceTrackName,
+            album: sourceAlbumName
+        ) else {
             return nil
         }
-        return try await spotifyLyricProvider.searchForTrackForAppleMusic(artist: currentlyPlayingArtist, track: currentlyPlayingName)
+        guard appleMusicTitlesPlausiblyMatch(sourceTrackName, result.SpotifyName) else {
+            print("[LyricFever][AppleMusicSync] rejected Spotify mismatch "
+                  + "source=\(sourceTrackName) candidate=\(result.SpotifyName)")
+            return nil
+        }
+        return result
+    }
+
+    private func appleMusicTitlesPlausiblyMatch(_ source: String, _ candidate: String) -> Bool {
+        let source = normalizedAppleMusicMetadata(source)
+        let candidate = normalizedAppleMusicMetadata(candidate)
+        guard !source.isEmpty, !candidate.isEmpty else {
+            return false
+        }
+        if source == candidate {
+            return true
+        }
+        let shorterCount = min(source.count, candidate.count)
+        let longerCount = max(source.count, candidate.count)
+        return shorterCount * 10 >= longerCount * 6
+            && (source.contains(candidate) || candidate.contains(source))
+    }
+
+    private func normalizedAppleMusicMetadata(_ value: String) -> String {
+        value
+            .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
+            .unicodeScalars
+            .filter(CharacterSet.alphanumerics.contains)
+            .map(String.init)
+            .joined()
+    }
+
+    private func appleMusicSourceFingerprint(
+        trackName: String,
+        artistName: String,
+        albumName: String?
+    ) -> String {
+        [
+            normalizedAppleMusicMetadata(trackName),
+            normalizedAppleMusicMetadata(artistName),
+            normalizedAppleMusicMetadata(albumName ?? "")
+        ].joined(separator: "|")
+    }
+
+    private func appleMusicMappingFingerprintKey(persistentID: String) -> String {
+        "appleMusicMappingFingerprint.\(persistentID)"
+    }
+
+    private func saveSpotifyMapping(
+        persistentID: String,
+        spotifyID: String,
+        sourceFingerprint: String
+    ) {
+        let fetchRequest: NSFetchRequest<PersistentIDToSpotify> = PersistentIDToSpotify.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "persistentID == %@", persistentID)
+        let mapping = (try? coreDataContainer.viewContext.fetch(fetchRequest).first)
+            ?? PersistentIDToSpotify(context: coreDataContainer.viewContext)
+        mapping.persistentID = persistentID
+        mapping.spotifyID = spotifyID
+        UserDefaults.standard.set(
+            sourceFingerprint,
+            forKey: appleMusicMappingFingerprintKey(persistentID: persistentID)
+        )
+        print("Apple Music Network Fetch: Saving persistent id \(persistentID) and Spotify ID \(spotifyID)")
+        saveCoreData()
     }
 }
 #endif

@@ -141,8 +141,58 @@ struct SearchWindow: View {
             currentProvider = lyricProvider.providerName
             let results = try await lyricProvider.search(trackName: trackName, artistName: artistName)
             if Task.isCancelled { return }
-            searchResults.append(contentsOf: results)
+            searchResults.append(contentsOf: results.filter(isRelevantSearchResult))
+            searchResults.sort {
+                searchResultRelevance($0) > searchResultRelevance($1)
+            }
         }
+    }
+
+    private func isRelevantSearchResult(_ result: SongResult) -> Bool {
+        searchResultRelevance(result) > 0
+    }
+
+    private func searchResultRelevance(_ result: SongResult) -> Int {
+        let queryTitle = normalizedSearchMetadata(trackName)
+        let resultTitle = normalizedSearchMetadata(result.songName)
+        guard !queryTitle.isEmpty, !resultTitle.isEmpty else {
+            return 0
+        }
+
+        let titleScore: Int
+        if queryTitle == resultTitle {
+            titleScore = 100
+        } else {
+            let shorterCount = min(queryTitle.count, resultTitle.count)
+            let longerCount = max(queryTitle.count, resultTitle.count)
+            guard shorterCount * 10 >= longerCount * 4,
+                  queryTitle.contains(resultTitle) || resultTitle.contains(queryTitle) else {
+                return 0
+            }
+            titleScore = 70
+        }
+
+        let queryArtist = normalizedSearchMetadata(artistName)
+        let resultArtist = normalizedSearchMetadata(result.artistName)
+        guard !queryArtist.isEmpty, !resultArtist.isEmpty else {
+            return titleScore
+        }
+        if queryArtist == resultArtist {
+            return titleScore + 30
+        }
+        if queryArtist.contains(resultArtist) || resultArtist.contains(queryArtist) {
+            return titleScore + 15
+        }
+        return titleScore
+    }
+
+    private func normalizedSearchMetadata(_ value: String) -> String {
+        value
+            .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
+            .unicodeScalars
+            .filter(CharacterSet.alphanumerics.contains)
+            .map(String.init)
+            .joined()
     }
     
     var body: some View {
@@ -157,6 +207,9 @@ struct SearchWindow: View {
                     .animation(.snappy(duration: 0.2), value: selectedLyric)
                 , alignment: .bottom)
             .onAppear {
+                if viewmodel.currentPlayer == .appleMusic {
+                    viewmodel.refreshAppleMusicMetadataFromPlayer()
+                }
                 trackName = viewmodel.currentlyPlayingName ?? ""
                 artistName = viewmodel.currentlyPlayingArtist ?? ""
                 // start initial search, canceling any potential concurrent search task

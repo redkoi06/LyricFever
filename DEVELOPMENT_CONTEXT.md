@@ -134,6 +134,9 @@ LyricFever/Views/KaraokeView/KaraokeView.swift
 - Apple Music 单曲循环不会改变 persistent ID，必须由 watchdog 检测播放位置回绕，清空旧的末句索引并重启歌词 updater。
 - 同一首歌回绕导致歌词索引从末句重置为 `nil` 时，全屏 AppKit 列表也必须重新预定位到首句，不能保留末尾滚动位置。
 - Karaoke 悬浮窗在播放期间不能因当前歌词索引为空而关闭；索引无效、空白歌词或纯音乐符占位行统一显示 `music.note` 图标，避免空框或窗口消失。
+- Apple Music 的显示与歌词搜索元数据必须以 Music ScriptingBridge 为权威来源；MediaRemote 只用于封面，Spotify 映射结果不得反向覆盖 Apple Music 歌名、歌手和专辑。
+- Apple Music persistent ID 到 Spotify ID 的缓存必须绑定源曲目元数据指纹；旧缓存或指纹不一致时重新搜索，并校验 Spotify 返回标题，防止错误匹配污染缓存。
+- 手动歌词搜索结果必须按规范化歌名过滤和排序；允许版本后缀等包含匹配，但歌词源返回的完全无关标题不得展示。
 
 ## 已知行为与暂未修改项
 
