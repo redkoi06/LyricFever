@@ -184,6 +184,7 @@ import MediaRemoteAdapter
     var spotifyConnectDelay: Bool = false
     var airplayDelay: Bool = false
     #endif
+    var currentManualLyricsOffsetMS = 0
     var isFetchingTranslation = false
     var translationExists: Bool { !translatedLyric.isEmpty}
     
@@ -288,6 +289,8 @@ import MediaRemoteAdapter
     @ObservationIgnored lazy var allNetworkLyricProvidersForSearch: [LyricProvider] = [spotifyLyricProvider, netEaseLyricProvider, lRCLyricProvider]
     
     var isFirstFetch = true
+    private let manualLyricsOffsetsKey = "manualLyricsOffsetsByTrackID"
+    private let manualLyricsOffsetBounds = -3000...3000
     
     init() {
         // Set our user locale for translation language
@@ -710,6 +713,7 @@ import MediaRemoteAdapter
             self.currentlyPlayingArtist = spotifyPlayer.artistName
             self.currentAlbumName = spotifyPlayer.albumName
             self.duration = duration
+            refreshManualLyricsOffsetForCurrentTrack()
             if let currentTime = spotifyPlayer.currentTime {
                 self.currentTime = CurrentTimeWithStoredDate(currentTime: currentTime)
             }
@@ -797,6 +801,64 @@ import MediaRemoteAdapter
         currentSpotifyEmptyLyricsRetryTask?.cancel()
         currentSpotifyEmptyLyricsRetryTask = nil
         spotifyEmptyLyricsRetryCount = 0
+    }
+
+    private func storedManualLyricsOffsets() -> [String: Int] {
+        let rawOffsets = UserDefaults.standard.dictionary(forKey: manualLyricsOffsetsKey) ?? [:]
+        return rawOffsets.compactMapValues { value in
+            if let intValue = value as? Int {
+                return intValue
+            }
+            if let numberValue = value as? NSNumber {
+                return numberValue.intValue
+            }
+            return nil
+        }
+    }
+
+    func manualLyricsOffsetMS(for trackID: String?) -> Int {
+        guard let trackID, !trackID.isEmpty else {
+            return 0
+        }
+        return storedManualLyricsOffsets()[trackID] ?? 0
+    }
+
+    func refreshManualLyricsOffsetForCurrentTrack() {
+        currentManualLyricsOffsetMS = manualLyricsOffsetMS(for: currentlyPlaying)
+    }
+
+    func setManualLyricsOffsetForCurrentTrack(_ offsetMS: Int) {
+        guard let currentlyPlaying, !currentlyPlaying.isEmpty else {
+            return
+        }
+        let clampedOffset = min(max(offsetMS, manualLyricsOffsetBounds.lowerBound), manualLyricsOffsetBounds.upperBound)
+        var offsets = storedManualLyricsOffsets()
+        if clampedOffset == 0 {
+            offsets.removeValue(forKey: currentlyPlaying)
+        } else {
+            offsets[currentlyPlaying] = clampedOffset
+        }
+        UserDefaults.standard.set(offsets, forKey: manualLyricsOffsetsKey)
+        currentManualLyricsOffsetMS = clampedOffset
+        applyManualLyricsOffsetChange()
+    }
+
+    func resetManualLyricsOffsetForCurrentTrack() {
+        setManualLyricsOffsetForCurrentTrack(0)
+    }
+
+    private func applyManualLyricsOffsetChange() {
+        guard !currentlyPlayingLyrics.isEmpty else {
+            return
+        }
+        if let currentTime = currentPlayerInstance.currentTime {
+            self.currentTime = CurrentTimeWithStoredDate(currentTime: currentTime)
+        }
+        currentlyPlayingLyricsIndex = nil
+        currentLyricsUpdaterTask?.cancel()
+        if isPlaying, showLyrics, userDefaultStorage.hasOnboarded {
+            startLyricUpdater(runSpotifyDriftFix: false)
+        }
     }
 
     private func ensureAppleMusicWatchdog() {
@@ -989,6 +1051,7 @@ import MediaRemoteAdapter
                 if let duration = spotifyPlayer.duration {
                     self.duration = duration
                 }
+                refreshManualLyricsOffsetForCurrentTrack()
                 refreshArtworkForCurrentTrack(reason: "spotify watchdog track correction")
             } else if currentlyPlayingLyrics.isEmpty, !isFetching, userDefaultStorage.hasOnboarded {
                 scheduleSpotifyEmptyLyricsRetry(for: spotifyTrackID, trackName: spotifyTrackName, reason: "watchdog saw empty lyrics")
@@ -1071,6 +1134,7 @@ import MediaRemoteAdapter
     func onCurrentlyPlayingIDChange() async {
         let expectedTrackID = currentlyPlaying
         spotifySyncLog("onCurrentlyPlayingIDChange expectedTrackID=\(expectedTrackID ?? "nil") name=\(currentlyPlayingName ?? "nil") lyricsCount=\(currentlyPlayingLyrics.count) isFetching=\(isFetching) emptyPostLoad=\(lyricsIsEmptyPostLoad)")
+        refreshManualLyricsOffsetForCurrentTrack()
         if currentPlayer == .spotify {
             resetSpotifyEmptyLyricsRetry()
             resetLyricStateForTrackChange()
@@ -1140,6 +1204,7 @@ import MediaRemoteAdapter
                     currentlyPlayingArtist = currentArtistName
                     self.duration = duration
                     self.currentAlbumName = currentAlbumName
+                    refreshManualLyricsOffsetForCurrentTrack()
                     self.currentTime = CurrentTimeWithStoredDate(currentTime: 0)
                     print(currentTrack)
                 }
@@ -1241,7 +1306,7 @@ import MediaRemoteAdapter
         } while !Task.isCancelled
     }
     
-    func startLyricUpdater() {
+    func startLyricUpdater(runSpotifyDriftFix: Bool = true) {
         spotifySyncLog("startLyricUpdater called isPlaying=\(isPlaying) lyricsCount=\(currentlyPlayingLyrics.count) index=\(currentlyPlayingLyricsIndex.map(String.init) ?? "nil") mustUpdateUrgent=\(mustUpdateUrgent)")
         currentLyricsUpdaterTask?.cancel()
         if !isPlaying || currentlyPlayingLyrics.isEmpty || mustUpdateUrgent {
@@ -1262,7 +1327,7 @@ import MediaRemoteAdapter
             }
         } else {
             #if os(macOS)
-            if currentPlayer == .spotify {
+            if runSpotifyDriftFix, currentPlayer == .spotify {
                 currentLyricsDriftFix?.cancel()
                 currentLyricsDriftFix =             // Only run drift fix for new songs
                 Task {
@@ -1506,6 +1571,7 @@ import MediaRemoteAdapter
     func setNewLyricsColorTranslationRomanizationAndStartUpdater(with newLyrics: [LyricLine]) {
         spotifySyncLog("setNewLyrics count=\(newLyrics.count) trackID=\(currentlyPlaying ?? "nil") isPlaying=\(isPlaying)")
         stopLyricUpdater()
+        refreshManualLyricsOffsetForCurrentTrack()
         currentlyPlayingLyricsIndex = nil
         translatedLyric = []
         resetRomanization()

@@ -625,6 +625,23 @@ struct MenubarWindowView: View {
             }
         )
     }
+
+    var manualLyricsOffsetBinding: Binding<Double> {
+        Binding(
+            get: { Double(viewmodel.currentManualLyricsOffsetMS) },
+            set: { newValue in
+                let snapped = Int(round(newValue / 100) * 100)
+                viewmodel.setManualLyricsOffsetForCurrentTrack(snapped)
+            }
+        )
+    }
+
+    var manualLyricsOffsetText: String {
+        let offset = viewmodel.currentManualLyricsOffsetMS
+        let seconds = abs(Double(offset) / 1000.0)
+        let prefix = offset > 0 ? "+" : offset < 0 ? "-" : ""
+        return "\(prefix)\(seconds.formatted(.number.precision(.fractionLength(1))))s"
+    }
     
     @ViewBuilder
     var menubarSizeSlider: some View {
@@ -657,6 +674,31 @@ struct MenubarWindowView: View {
             let seconds = Double(viewmodel.userDefaultStorage.spotifyConnectDelayCount) / 1000.0
             Text("\(seconds.formatted(.number.precision(.fractionLength(1))))s")
                 .frame(width: 27)
+        }
+        .tint(.secondary)
+    }
+
+    @ViewBuilder
+    var manualLyricsOffsetSlider: some View {
+        HStack {
+            Image(systemName: "timer")
+                .frame(width: 30)
+            Slider(value: manualLyricsOffsetBinding, in: -3000...3000, step: 100) {
+                Text("Lyrics Offset")
+            }
+            .labelsHidden()
+            .frame(width: 150)
+            .disabled(viewmodel.currentlyPlaying == nil)
+            Text(manualLyricsOffsetText)
+                .frame(width: 42, alignment: .trailing)
+            Button {
+                viewmodel.resetManualLyricsOffsetForCurrentTrack()
+            } label: {
+                Image(systemName: "arrow.counterclockwise")
+            }
+            .buttonStyle(.plain)
+            .disabled(viewmodel.currentlyPlaying == nil || viewmodel.currentManualLyricsOffsetMS == 0)
+            .help("Reset Lyrics Offset")
         }
         .tint(.secondary)
     }
@@ -710,6 +752,9 @@ struct MenubarWindowView: View {
                 .environment(\.colorScheme, .dark)
             volumeSlider
                 .environment(\.colorScheme, .dark)
+            Divider()
+            manualLyricsOffsetSlider
+                .environment(\.colorScheme, .dark)
             if viewmodel.spotifyConnectDelay {
                 Divider()
                 spotifyDelaySlider
@@ -741,4 +786,3 @@ struct MenubarWindowView: View {
         }
     }
 }
-
