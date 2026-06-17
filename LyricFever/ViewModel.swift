@@ -1617,7 +1617,8 @@ extension ViewModel {
         // check coredata for apple music persistent id -> spotify id mapping
         if let coreDataSpotifyID = fetchSpotifyIDFromPersistentIDCoreData(
             persistentID: expectedPersistentID,
-            sourceFingerprint: sourceFingerprint
+            sourceFingerprint: sourceFingerprint,
+            sourceTrackName: sourceTrackName
         ) {
             if !Task.isCancelled {
                 guard currentlyPlayingAppleMusicPersistentID == expectedPersistentID,
@@ -1629,14 +1630,36 @@ extension ViewModel {
                 return
             }
         }
+        if let cachedFallbackID = cachedAppleMusicFallbackTrackID(sourceTrackName: sourceTrackName) {
+            guard currentlyPlayingAppleMusicPersistentID == expectedPersistentID,
+                  appleMusicPlayer.persistentID == expectedPersistentID else {
+                return
+            }
+            print("Apple Music CoreData Fetch: using cached fallback id \(cachedFallbackID)")
+            self.currentlyPlaying = cachedFallbackID
+            return
+        }
         print("Apple Music Fetch: No CoreData val. Fetching from network")
-        try await appleMusicNetworkFetch(
-            expectedPersistentID: expectedPersistentID,
-            sourceTrackName: sourceTrackName,
-            sourceArtistName: sourceArtistName,
-            sourceAlbumName: sourceAlbumName,
-            sourceFingerprint: sourceFingerprint
-        )
+        do {
+            try await appleMusicNetworkFetch(
+                expectedPersistentID: expectedPersistentID,
+                sourceTrackName: sourceTrackName,
+                sourceArtistName: sourceArtistName,
+                sourceAlbumName: sourceAlbumName,
+                sourceFingerprint: sourceFingerprint
+            )
+        } catch {
+            if let cachedFallbackID = cachedAppleMusicFallbackTrackID(sourceTrackName: sourceTrackName) {
+                guard currentlyPlayingAppleMusicPersistentID == expectedPersistentID,
+                      appleMusicPlayer.persistentID == expectedPersistentID else {
+                    return
+                }
+                print("Apple Music Network Fetch failed; using cached fallback id \(cachedFallbackID)")
+                self.currentlyPlaying = cachedFallbackID
+                return
+            }
+            throw error
+        }
     }
 
     func appleMusicNetworkFetch(
@@ -1692,14 +1715,11 @@ extension ViewModel {
     
     func fetchSpotifyIDFromPersistentIDCoreData(
         persistentID: String,
-        sourceFingerprint: String
+        sourceFingerprint: String,
+        sourceTrackName: String
     ) -> String? {
-        guard UserDefaults.standard.string(
-            forKey: appleMusicMappingFingerprintKey(persistentID: persistentID)
-        ) == sourceFingerprint else {
-            print("Apple Music CoreData Fetch: mapping fingerprint missing or stale for \(persistentID)")
-            return nil
-        }
+        let fingerprintKey = appleMusicMappingFingerprintKey(persistentID: persistentID)
+        let storedFingerprint = UserDefaults.standard.string(forKey: fingerprintKey)
         let fetchRequest: NSFetchRequest<PersistentIDToSpotify> = PersistentIDToSpotify.fetchRequest()
         fetchRequest.predicate = NSPredicate(format: "persistentID == %@", persistentID)
 
@@ -1708,7 +1728,18 @@ extension ViewModel {
             if let persistentIDToSpotify = results.first {
                 // Found the persistentIDToSpotify object with the matching persistentID
                 print("Apple Music CoreData Fetch: Found SpotifyID \(persistentIDToSpotify.spotifyID) for \(persistentIDToSpotify.persistentID)")
-                return persistentIDToSpotify.spotifyID
+                guard let spotifyID = persistentIDToSpotify.spotifyID else {
+                    return nil
+                }
+                if storedFingerprint == sourceFingerprint {
+                    return spotifyID
+                }
+                if cachedLyricsExist(for: spotifyID, matchingTitle: sourceTrackName) {
+                    print("Apple Music CoreData Fetch: accepting legacy mapping with cached lyrics for \(persistentID)")
+                    UserDefaults.standard.set(sourceFingerprint, forKey: fingerprintKey)
+                    return spotifyID
+                }
+                print("Apple Music CoreData Fetch: mapping fingerprint missing or stale for \(persistentID)")
             } else {
                 // No SongObject found with the given trackID
                 print("No spotifyID found with the provided persistentID. \(currentlyPlayingAppleMusicPersistentID)")
@@ -1717,6 +1748,31 @@ extension ViewModel {
             print("Error fetching persistentIDToSpotify:", error)
         }
         return nil
+    }
+
+    private func cachedAppleMusicFallbackTrackID(sourceTrackName: String) -> String? {
+        guard let alternativeID = appleMusicPlayer.alternativeID, alternativeID != "" else {
+            return nil
+        }
+        return cachedLyricsExist(for: alternativeID, matchingTitle: sourceTrackName) ? alternativeID : nil
+    }
+
+    private func cachedLyricsExist(for trackID: String, matchingTitle sourceTrackName: String) -> Bool {
+        let fetchRequest: NSFetchRequest<SongObject> = SongObject.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "id == %@", trackID)
+
+        do {
+            guard let songObject = try coreDataContainer.viewContext.fetch(fetchRequest).first else {
+                return false
+            }
+            guard !songObject.lyricsWords.isEmpty, !songObject.lyricsTimestamps.isEmpty else {
+                return false
+            }
+            return appleMusicTitlesPlausiblyMatch(sourceTrackName, songObject.title)
+        } catch {
+            print("Apple Music CoreData Fetch: error checking cached lyrics for \(trackID): \(error)")
+            return false
+        }
     }
     
     private func musicToSpotifyHelper(
