@@ -516,6 +516,11 @@ struct MenubarWindowView: View {
     @ViewBuilder
     var otherOptions: some View {
         @Bindable var viewmodel = viewmodel
+        menubarSizeSlider
+            .environment(\.colorScheme, .dark)
+        volumeSlider
+            .environment(\.colorScheme, .dark)
+        Divider()
         Toggle("Show Song Details in Menubar", isOn: $viewmodel.userDefaultStorage.showSongDetailsInMenubar)
         Divider()
         streamingDelayView
@@ -649,9 +654,19 @@ struct MenubarWindowView: View {
         HStack {
             Image(systemName: "textformat.size")
                 .frame(width: 30)
-            Slider(value: menubarSizeSliderBinding, in: 30...60, step: 10, label: {
-                Text("Menubar Size")
-            })
+            Group {
+                if #available(macOS 26.0, *) {
+                    Slider(value: menubarSizeSliderBinding, in: 30...60) {
+                        Text("Menubar Size")
+                    } ticks: {
+
+                    }
+                } else {
+                    Slider(value: menubarSizeSliderBinding, in: 30...60, step: 10) {
+                        Text("Menubar Size")
+                    }
+                }
+            }
             .labelsHidden()
             .frame(width: 160)
             Text("\(viewmodel.userDefaultStorage.truncationLength)")
@@ -666,8 +681,18 @@ struct MenubarWindowView: View {
         HStack {
             Image(systemName: "tortoise")
                 .frame(width: 34, alignment: .trailing)
-            Slider(value: spotifyDelayBinding, in: 300...3000, step: 100) {
-                Text("Spotify Delay")
+            Group {
+                if #available(macOS 26.0, *) {
+                    Slider(value: spotifyDelayBinding, in: 300...3000) {
+                        Text("Spotify Delay")
+                    } ticks: {
+
+                    }
+                } else {
+                    Slider(value: spotifyDelayBinding, in: 300...3000, step: 100) {
+                        Text("Spotify Delay")
+                    }
+                }
             }
             .labelsHidden()
             .frame(width: 160)
@@ -683,8 +708,18 @@ struct MenubarWindowView: View {
         HStack {
             Image(systemName: "timer")
                 .frame(width: 30)
-            Slider(value: manualLyricsOffsetBinding, in: -3000...3000, step: 100) {
-                Text("Lyrics Offset")
+            Group {
+                if #available(macOS 26.0, *) {
+                    Slider(value: manualLyricsOffsetBinding, in: -3000...3000) {
+                        Text("Lyrics Offset")
+                    } ticks: {
+
+                    }
+                } else {
+                    Slider(value: manualLyricsOffsetBinding, in: -3000...3000, step: 100) {
+                        Text("Lyrics Offset")
+                    }
+                }
             }
             .labelsHidden()
             .frame(width: 150)
@@ -747,11 +782,6 @@ struct MenubarWindowView: View {
             lyricModifierView
             Divider()
             viewSelector
-            Divider()
-            menubarSizeSlider
-                .environment(\.colorScheme, .dark)
-            volumeSlider
-                .environment(\.colorScheme, .dark)
             Divider()
             manualLyricsOffsetSlider
                 .environment(\.colorScheme, .dark)
