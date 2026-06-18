@@ -30,16 +30,7 @@ struct SearchWindow: View {
             TextField("", text: $artistName)
                 .padding(.trailing, 30)
             Button {
-                searchResults = []
-                // cancel any stale search task
-                searchTask?.cancel()
-                searchTask = Task { @MainActor in
-                    do {
-                        try await searchLyrics()
-                    } catch {
-                        print("Search Task Error: \(error)")
-                    }
-                }
+                startSearchTask()
             } label: {
                 Image(systemName: "magnifyingglass")
             }
@@ -136,15 +127,55 @@ struct SearchWindow: View {
         isFetching = true
         defer { isFetching = false }
         searchResults = []
+        let trackNameCandidates = titleSearchCandidates(for: trackName)
         for lyricProvider in viewmodel.allNetworkLyricProvidersForSearch {
             if Task.isCancelled { return }
             currentProvider = lyricProvider.providerName
-            let results = try await lyricProvider.search(trackName: trackName, artistName: artistName)
-            if Task.isCancelled { return }
-            searchResults.append(contentsOf: results.filter(isRelevantSearchResult))
-            searchResults.sort {
+            var providerResults: [SongResult] = []
+            for candidateTrackName in trackNameCandidates {
+                if Task.isCancelled { return }
+                let results = try await lyricProvider.search(trackName: candidateTrackName, artistName: artistName)
+                if Task.isCancelled { return }
+                providerResults.append(contentsOf: results)
+            }
+            searchResults.append(contentsOf: providerResults.filter(isRelevantSearchResult))
+            searchResults = deduplicatedSearchResults(searchResults).sorted {
                 searchResultRelevance($0) > searchResultRelevance($1)
             }
+        }
+    }
+
+    private func startSearchTask() {
+        selectedLyric = nil
+        searchResults = []
+        searchTask?.cancel()
+        searchTask = Task { @MainActor in
+            do {
+                try await searchLyrics()
+            } catch {
+                print("Search Task Error: \(error)")
+            }
+        }
+    }
+
+    private func syncTrackFieldsFromViewModel() {
+        if viewmodel.currentPlayer == .appleMusic {
+            viewmodel.refreshAppleMusicMetadataFromPlayer()
+        }
+        trackName = viewmodel.currentlyPlayingName ?? ""
+        artistName = viewmodel.currentlyPlayingArtist ?? ""
+    }
+
+    private func deduplicatedSearchResults(_ results: [SongResult]) -> [SongResult] {
+        var seen: Set<String> = []
+        return results.filter { result in
+            let key = [
+                result.lyricType,
+                normalizedSearchMetadata(result.songName),
+                normalizedSearchMetadata(result.artistName),
+                normalizedSearchMetadata(result.albumName)
+            ].joined(separator: "|")
+            return seen.insert(key).inserted
         }
     }
 
@@ -153,20 +184,28 @@ struct SearchWindow: View {
     }
 
     private func searchResultRelevance(_ result: SongResult) -> Int {
-        let queryTitle = normalizedSearchMetadata(trackName)
         let resultTitle = normalizedSearchMetadata(result.songName)
-        guard !queryTitle.isEmpty, !resultTitle.isEmpty else {
+        guard !resultTitle.isEmpty else {
             return 0
         }
 
         let titleScore: Int
-        if queryTitle == resultTitle {
+        let queryTitles = titleSearchCandidates(for: trackName)
+            .map(normalizedSearchMetadata)
+            .filter { !$0.isEmpty }
+        guard !queryTitles.isEmpty else {
+            return 0
+        }
+
+        if queryTitles.contains(resultTitle) {
             titleScore = 100
         } else {
-            let shorterCount = min(queryTitle.count, resultTitle.count)
-            let longerCount = max(queryTitle.count, resultTitle.count)
-            guard shorterCount * 10 >= longerCount * 4,
-                  queryTitle.contains(resultTitle) || resultTitle.contains(queryTitle) else {
+            guard queryTitles.contains(where: { queryTitle in
+                let shorterCount = min(queryTitle.count, resultTitle.count)
+                let longerCount = max(queryTitle.count, resultTitle.count)
+                return shorterCount * 10 >= longerCount * 4
+                    && (queryTitle.contains(resultTitle) || resultTitle.contains(queryTitle))
+            }) else {
                 return 0
             }
             titleScore = 70
@@ -194,6 +233,24 @@ struct SearchWindow: View {
             .map(String.init)
             .joined()
     }
+
+    private func titleSearchCandidates(for title: String) -> [String] {
+        let stripped = title
+            .replacingOccurrences(
+                of: #"[\s　]*[\(\（\[\【].*?[\)\）\]\】][\s　]*"#,
+                with: " ",
+                options: .regularExpression
+            )
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return [title, stripped]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .reduce(into: []) { partialResult, candidate in
+                if !partialResult.contains(candidate) {
+                    partialResult.append(candidate)
+                }
+            }
+    }
     
     var body: some View {
         searchWindow
@@ -207,20 +264,8 @@ struct SearchWindow: View {
                     .animation(.snappy(duration: 0.2), value: selectedLyric)
                 , alignment: .bottom)
             .onAppear {
-                if viewmodel.currentPlayer == .appleMusic {
-                    viewmodel.refreshAppleMusicMetadataFromPlayer()
-                }
-                trackName = viewmodel.currentlyPlayingName ?? ""
-                artistName = viewmodel.currentlyPlayingArtist ?? ""
-                // start initial search, canceling any potential concurrent search task
-                searchTask?.cancel()
-                searchTask = Task { @MainActor in
-                    do {
-                        try await searchLyrics()
-                    } catch {
-                        print("Search task error: \(error)")
-                    }
-                }
+                syncTrackFieldsFromViewModel()
+                startSearchTask()
             }
             .onChange(of: selectedLyric) {
                 lyricsAreApplied = false
@@ -234,6 +279,8 @@ struct SearchWindow: View {
                 isFetching = false
                 searchResults = []
                 lyricsAreApplied = false
+                syncTrackFieldsFromViewModel()
+                startSearchTask()
             }
             .onChange(of: viewmodel.currentlyPlayingName) { oldName, newName in
                 if let newName {

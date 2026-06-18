@@ -37,8 +37,6 @@ class AppleMusicPlayer: Player {
         let viewmodel = ViewModel.shared
         return playerPosition * 1000
             + Double(viewmodel.currentManualLyricsOffsetMS)
-            + 400
-            + (viewmodel.animatedDisplay ? 400 : 0)
             + (viewmodel.airplayDelay ? -2000 : 0)
     }
     var duration: Int? {

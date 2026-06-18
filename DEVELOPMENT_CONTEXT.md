@@ -137,6 +137,9 @@ LyricFever/Views/KaraokeView/KaraokeView.swift
 - Apple Music 的显示与歌词搜索元数据必须以 Music ScriptingBridge 为权威来源；MediaRemote 只用于封面，Spotify 映射结果不得反向覆盖 Apple Music 歌名、歌手和专辑。
 - Apple Music persistent ID 到 Spotify ID 的缓存必须绑定源曲目元数据指纹；旧缓存或指纹不一致时重新搜索，并校验 Spotify 返回标题，防止错误匹配污染缓存。
 - 手动歌词搜索结果必须按规范化歌名过滤和排序；允许版本后缀等包含匹配，但歌词源返回的完全无关标题不得展示。
+- Apple Music 网络映射阶段设置 `isFetching` 时必须用 `defer` 保底复位；否则映射失败、曲目切换或提前返回会让菜单窗口长期显示加载态。
+- 搜索窗口会被 SwiftUI 复用，切歌时不能只清空结果；必须同步当前曲目信息并重新搜索。带括号副标题的歌曲名应同时尝试去括号后的主标题。
+- Apple Music 的当前时间应贴近 Music.app 官方歌词时间轴，不要套用 Spotify/动画的默认提前补偿；需要微调时使用每首歌手动 offset 或 AirPlay offset。
 
 ## 已知行为与暂未修改项
 

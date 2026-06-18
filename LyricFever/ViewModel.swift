@@ -1736,6 +1736,10 @@ extension ViewModel {
         sourceFingerprint: String
     ) async throws {
         isFetching = true
+        defer {
+            isFetching = false
+            print("Apple Music Network Fetch: isFetching set to false")
+        }
 //        do {
 //            print("Apple Music Network Fetch: 3 second sleep")
 //            try await Task.sleep(for: .seconds(3))
