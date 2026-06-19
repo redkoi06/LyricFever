@@ -4,6 +4,8 @@
 <dict>
 	<key></key>
 	<string></string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>Lyric Fever captures system audio with ScreenCaptureKit to animate the screen edge visualizer.</string>
 	<key>SUAllowsAutomaticUpdates</key>
 	<true/>
 	<key>SUAutomaticallyUpdate</key>

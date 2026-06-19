@@ -130,6 +130,10 @@ import MediaRemoteAdapter
     // nil to deal with previously saved songs that don't have lang saved with them
     // or for LRCLIB
     var currentBackground: Color? = nil
+    var edgeVisualizerLevel: Double = 0
+    var edgeVisualizerStatus: String?
+    @ObservationIgnored private let edgeAudioMonitor = EdgeAudioMonitor()
+    @ObservationIgnored private var edgeVisualizerStartTask: Task<Void, Never>?
     
     var animatedDisplay: Bool {
         get {
@@ -1129,6 +1133,7 @@ import MediaRemoteAdapter
     
     func onAppear(_ openWindow: OpenWindowAction) {
         setCurrentProperties()
+        syncEdgeVisualizer()
     }
     
     func onCurrentlyPlayingIDChange() async {
@@ -1433,6 +1438,38 @@ import MediaRemoteAdapter
         
         ColorDataService.saveColorToCoreData(trackID: currentlyPlaying, songColor: colorInt)
         currentBackground = intToRGB(colorInt)
+    }
+
+    func syncEdgeVisualizer() {
+        edgeAudioMonitor.onLevel = { [weak self] level in
+            Task { @MainActor in
+                self?.edgeVisualizerLevel = level
+            }
+        }
+        edgeAudioMonitor.onStatus = { [weak self] status in
+            Task { @MainActor in
+                self?.edgeVisualizerStatus = status
+            }
+        }
+
+        edgeVisualizerStartTask?.cancel()
+
+        if userDefaultStorage.edgeVisualizerEnabled {
+            edgeVisualizerStartTask = Task { [weak self] in
+                await self?.edgeAudioMonitor.start()
+            }
+        } else {
+            edgeVisualizerStartTask = Task { [weak self] in
+                await self?.edgeAudioMonitor.stop()
+            }
+        }
+    }
+
+    func openScreenRecordingSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") else {
+            return
+        }
+        NSWorkspace.shared.open(url)
     }
     #endif
     

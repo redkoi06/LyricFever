@@ -81,6 +81,10 @@ struct LyricFever: App {
                     .animation(.easeIn(duration: 0.2))
                     .environment(viewmodel)
             }
+            .edgeVisualizerPanel(isPresented: Binding(
+                get: { viewmodel.userDefaultStorage.edgeVisualizerEnabled },
+                set: { viewmodel.userDefaultStorage.edgeVisualizerEnabled = $0 }
+            ))
             .onAppear {
                 viewmodel.onAppear(openWindow)
             }
@@ -140,6 +144,9 @@ struct LyricFever: App {
             }
             .onChange(of: viewmodel.userDefaultStorage.translate) {
                 viewmodel.openTranslationHelpOnFirstRun(openURL)
+            }
+            .onChange(of: viewmodel.userDefaultStorage.edgeVisualizerEnabled) {
+                viewmodel.syncEdgeVisualizer()
             }
             .onChange(of: viewmodel.userDefaultStorage.cookie) {
                 viewmodel.spotifyLyricProvider.accessToken = nil

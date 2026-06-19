@@ -54,6 +54,8 @@ class UserDefaultStorage {
     // User setting: hide karaoke on hover
     @ObservableUserDefault(.init(key: "karaokeModeHoveringSetting", defaultValue: false, store: .standard))
     @ObservationIgnored var karaokeModeHoveringSetting: Bool
+    @ObservableUserDefault(.init(key: "edgeVisualizerEnabled", defaultValue: false, store: .standard))
+    @ObservationIgnored var edgeVisualizerEnabled: Bool
     #endif
 
 //    @DefaultsKey(userDefaultsKey: "spDcCookie")

@@ -522,6 +522,15 @@ struct MenubarWindowView: View {
             .environment(\.colorScheme, .dark)
         Divider()
         Toggle("Show Song Details in Menubar", isOn: $viewmodel.userDefaultStorage.showSongDetailsInMenubar)
+        Toggle("Screen Edge Visualizer", isOn: $viewmodel.userDefaultStorage.edgeVisualizerEnabled)
+        if let edgeVisualizerStatus = viewmodel.edgeVisualizerStatus {
+            Text(edgeVisualizerStatus)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Button("Open Privacy Settings") {
+                viewmodel.openScreenRecordingSettings()
+            }
+        }
         Divider()
         streamingDelayView
         Button("Settings (New Karaoke Settings!)") {
