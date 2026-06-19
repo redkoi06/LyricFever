@@ -51,9 +51,8 @@ private final class EdgeVisualizerPanelController {
 
         for screen in NSScreen.screens {
             let panel = EdgeVisualizerPanel(screenFrame: screen.frame)
-            let hostingView = NSHostingView(rootView: EdgeVisualizerView()
+            let hostingView = TransparentHostingView(rootView: EdgeVisualizerView()
                 .environment(ViewModel.shared))
-            hostingView.layer?.backgroundColor = NSColor.clear.cgColor
             panel.contentView = hostingView
             panel.orderFrontRegardless()
             panels.append(panel)
@@ -83,7 +82,7 @@ private final class EdgeVisualizerPanel: NSPanel {
 
         setFrame(screenFrame, display: true)
         isFloatingPanel = true
-        level = .screenSaver
+        level = .floating
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         backgroundColor = .clear
         isOpaque = false
@@ -101,6 +100,25 @@ private final class EdgeVisualizerPanel: NSPanel {
 
     override var canBecomeMain: Bool {
         false
+    }
+}
+
+private final class TransparentHostingView<Content: View>: NSHostingView<Content> {
+    override var isOpaque: Bool {
+        get { false }
+        set { }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.clear.setFill()
+        dirtyRect.fill()
+        super.draw(dirtyRect)
     }
 }
 #endif

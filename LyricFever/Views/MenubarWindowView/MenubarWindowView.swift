@@ -17,6 +17,7 @@ struct MenubarWindowView: View {
     @Environment(\.colorScheme) var colorScheme
     @State var currentHoveredItem = MenubarButtonHighlight.none
     @State var supportedLanguages: [Locale.Language] = []
+    @State private var showOtherOptionsPopover = false
     
     @ViewBuilder
     var profilePicViewHeaderView: some View {
@@ -514,83 +515,121 @@ struct MenubarWindowView: View {
     }
     
     @ViewBuilder
-    var otherOptions: some View {
+    var otherOptionsPopover: some View {
         @Bindable var viewmodel = viewmodel
-        menubarSizeSlider
-            .environment(\.colorScheme, .dark)
-        volumeSlider
-            .environment(\.colorScheme, .dark)
-        Divider()
-        Toggle("Show Song Details in Menubar", isOn: $viewmodel.userDefaultStorage.showSongDetailsInMenubar)
-        Toggle("Screen Edge Visualizer", isOn: $viewmodel.userDefaultStorage.edgeVisualizerEnabled)
-        if let edgeVisualizerStatus = viewmodel.edgeVisualizerStatus {
-            Text(edgeVisualizerStatus)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Button("Open Privacy Settings") {
-                viewmodel.openScreenRecordingSettings()
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 12) {
+                optionSliderRow(
+                    title: "菜单栏显示长度",
+                    systemImage: "textformat.size",
+                    valueText: "\(viewmodel.userDefaultStorage.truncationLength)",
+                    slider: AnyView(
+                        Slider(value: menubarSizeSliderBinding, in: 30...60)
+                    )
+                )
+                optionSliderRow(
+                    title: "音量",
+                    systemImage: "speaker.wave.3",
+                    valueText: "\(viewmodel.currentVolume)",
+                    slider: AnyView(
+                        Slider(value: volumeBinding, in: 0...100)
+                    )
+                )
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle("在菜单栏显示歌曲详情", isOn: $viewmodel.userDefaultStorage.showSongDetailsInMenubar)
+                Toggle("Screen Edge Visualizer", isOn: $viewmodel.userDefaultStorage.edgeVisualizerEnabled)
+
+                if let edgeVisualizerStatus = viewmodel.edgeVisualizerStatus {
+                    Text(edgeVisualizerStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Open Privacy Settings") {
+                        viewmodel.openScreenRecordingSettings()
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+
+            Divider()
+
+            streamingDelayView
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                Button("设置（新增 K 歌设置）") {
+                    openWindow(id: "onboarding")
+                    NSApplication.shared.activate(ignoringOtherApps: true)
+                    NotificationCenter.default.post(name: Notification.Name("didClickSettings"), object: nil)
+                }
+                .keyboardShortcut("s")
+                .buttonStyle(.borderless)
+
+                LaunchAtLogin.Toggle(String(localized: "Launch at Login"))
+                    .disabled(!viewmodel.userDefaultStorage.hasOnboarded)
+                    .keyboardShortcut("l")
+
+                Button("检查更新...") {
+                    viewmodel.updaterService.updaterController.checkForUpdates(nil)
+                }
+                .keyboardShortcut("u")
+                .buttonStyle(.borderless)
+
+                Button("Buy Me A Beer (Thank You)!") {
+                    openURL(URL(string: "https://buymeacoffee.com/aviwadhwalyricfever")!)
+                }
+                .buttonStyle(.borderless)
             }
         }
-        Divider()
-        streamingDelayView
-        Button("Settings (New Karaoke Settings!)") {
-            openWindow(id: "onboarding")
-            NSApplication.shared.activate(ignoringOtherApps: true)
-            // send notification to check auth
-            NotificationCenter.default.post(name: Notification.Name("didClickSettings"), object: nil)
-        }.keyboardShortcut("s")
-        LaunchAtLogin.Toggle(String(localized: "Launch at Login"))
-        .disabled(!viewmodel.userDefaultStorage.hasOnboarded)
-        .keyboardShortcut("l")
-        Button("Check for Updates…") {
-            viewmodel.updaterService.updaterController.checkForUpdates(nil)
-        }
-        Divider()
-            .keyboardShortcut("u")
-        Button("Buy Me A Beer (Thank You)!") {
-            openURL(URL(string: "https://buymeacoffee.com/aviwadhwalyricfever")!)
+        .tint(viewmodel.currentBackground ?? .accentColor)
+        .foregroundStyle(.white)
+        .environment(\.colorScheme, .dark)
+        .padding(16)
+        .frame(width: 320)
+        .background(.ultraThinMaterial)
+    }
+
+    private func optionSliderRow(title: LocalizedStringKey, systemImage: String, valueText: String, slider: AnyView) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .frame(width: 20)
+                Text(title)
+                Spacer()
+                Text(valueText)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            slider
         }
     }
     
     @ViewBuilder
     var systemControlView: some View {
         HStack {
-            if #available(macOS 26.0, *) {
-                Menu {
-                    otherOptions
-//                        .foregroundStyle(viewmodel.currentBackground ?? .primary)
-                } label: {
-
-                        Text("...")
-                }
-                .environment(\.colorScheme, .dark)
-                .menuIndicator(.hidden)
-                .onHover { isHovering in
-                    if isHovering {
-                        currentHoveredItem = .moreOptions
-                    } else {
-                        currentHoveredItem = .none
-                    }
-                }
-            } else {
-                Menu {
-                    otherOptions
-                        .foregroundStyle(viewmodel.currentBackground ?? .primary)
-                } label: {
-
-                        Text("...")
-                }
-                .frame(width: 30)
-                .environment(\.colorScheme, .dark)
-                .menuIndicator(.hidden)
-                .onHover { isHovering in
-                    if isHovering {
-                        currentHoveredItem = .moreOptions
-                    } else {
-                        currentHoveredItem = .none
-                    }
+            Button {
+                showOtherOptionsPopover.toggle()
+            } label: {
+                Text("...")
+                    .frame(width: 30)
+            }
+            .buttonStyle(.borderless)
+            .popover(isPresented: $showOtherOptionsPopover, arrowEdge: .bottom) {
+                otherOptionsPopover
+            }
+            .onHover { isHovering in
+                if isHovering {
+                    currentHoveredItem = .moreOptions
+                } else {
+                    currentHoveredItem = .none
                 }
             }
+
             if viewmodel.airplayDelay {
                 Image(systemName: "airplayaudio")
                     .opacity(0.8)
