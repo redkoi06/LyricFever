@@ -18,6 +18,7 @@ struct KaraokeSettingsView: View {
     @AppStorage("karaokeShowMultilingual") var karaokeShowMultilingual: Bool = true
     @AppStorage("karaokeShowRomanization") var karaokeShowRomanization: Bool = false
     @AppStorage("karaokeTransparency") var karaokeTransparency: Double = 50
+    private let defaultFixedKaraokeColorHex = "#2D3CCC"
     
     var colorBinding: Binding<Color> {
         Binding<Color> {
@@ -71,19 +72,22 @@ struct KaraokeSettingsView: View {
             FontPicker("Select a Font:", selection: $viewmodel.karaokeFont)
                 .frame(height: 30)
                 .buttonStyle(.bordered)
+                .onChange(of: viewmodel.karaokeFont) {
+                    viewmodel.saveKaraokeFont()
+                }
             Text("Font Selected: \(viewmodel.karaokeFont.displayName ?? ""), Size: \(Int(viewmodel.karaokeFont.pointSize))")
                 .font(.custom(viewmodel.karaokeFont.fontName, size: 13))
             
             .frame(width: 300, height: 24)
             Button("Reset to default") {
-                viewmodel.userDefaultStorage.karaokeModeHoveringSetting = false
+                karaokeModeHoveringSetting = false
                 karaokeUseAlbumColor = true
-                viewmodel.userDefaultStorage.karaokeShowMultilingual = true
-                viewmodel.userDefaultStorage.karaokeShowRomanization = false
-                viewmodel.userDefaultStorage.karaokeTransparency = 50
-                viewmodel.karaokeFont = NSFont.boldSystemFont(ofSize: 30)
-//                viewmodel.karaokeFontSize = 30
-                colorBinding.wrappedValue = Color(.sRGB, red: 0.98, green: 0.0, blue: 0.98)
+                karaokeShowMultilingual = true
+                karaokeShowRomanization = false
+                karaokeTransparency = 50
+                fixedKaraokeColorHex = defaultFixedKaraokeColorHex
+                viewmodel.karaokeFont = ViewModel.defaultKaraokeFont
+                viewmodel.saveKaraokeFont()
                 
             }
             Spacer()

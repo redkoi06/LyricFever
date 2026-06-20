@@ -96,6 +96,14 @@ import MediaRemoteAdapter
     }
     
     #if os(macOS)
+    private static let karaokeFontNameKey = "karaokeFontName"
+    private static let karaokeFontSizeKey = "karaokeFontSize"
+
+    static var defaultKaraokeFont: NSFont {
+        NSFont(name: "PingFangSC-Medium", size: 14)
+        ?? NSFont.systemFont(ofSize: 14, weight: .medium)
+    }
+
     var updaterService = UpdaterService()
     var appleMusicPlayer = AppleMusicPlayer()
     var spotifyPlayer = SpotifyPlayer()
@@ -303,12 +311,12 @@ import MediaRemoteAdapter
         
         #if os(macOS)
         // Generate user-saved font and load it
-        let karaokeFontSize: Double = UserDefaults.standard.double(forKey: "karaokeFontSize")
-        let karaokeFontName: String? = UserDefaults.standard.string(forKey: "karaokeFontName")
+        let karaokeFontSize: Double = UserDefaults.standard.double(forKey: Self.karaokeFontSizeKey)
+        let karaokeFontName: String? = UserDefaults.standard.string(forKey: Self.karaokeFontNameKey)
         if let karaokeFontName, karaokeFontSize != 0, let ourKaraokeFont = NSFont(name: karaokeFontName, size: karaokeFontSize) {
             karaokeFont = ourKaraokeFont
         } else {
-            karaokeFont = NSFont.boldSystemFont(ofSize: 30)
+            karaokeFont = Self.defaultKaraokeFont
         }
         #endif
         
@@ -646,10 +654,14 @@ import MediaRemoteAdapter
     }
     
     #if os(macOS)
+    func saveKaraokeFont() {
+        UserDefaults.standard.set(karaokeFont.fontName, forKey: Self.karaokeFontNameKey)
+        UserDefaults.standard.set(Double(karaokeFont.pointSize), forKey: Self.karaokeFontSizeKey)
+    }
+
     func saveKaraokeFontOnTermination() {
         // This code will be executed just before the app terminates
-     UserDefaults.standard.set(karaokeFont.fontName, forKey: "karaokeFontName")
-     UserDefaults.standard.set(Double(karaokeFont.pointSize), forKey: "karaokeFontSize")
+        saveKaraokeFont()
     }
     
     func appleMusicPlaybackDidChange(_ notification: Notification) {
