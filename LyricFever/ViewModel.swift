@@ -308,7 +308,7 @@ import MediaRemoteAdapter
         // Set our user locale for translation language
         systemLocale = Locale.preferredLocale()
         systemLocaleString = Locale.preferredLocaleString() ?? ""
-        
+
         #if os(macOS)
         // Generate user-saved font and load it
         let karaokeFontSize: Double = UserDefaults.standard.double(forKey: Self.karaokeFontSizeKey)
@@ -319,7 +319,7 @@ import MediaRemoteAdapter
             karaokeFont = Self.defaultKaraokeFont
         }
         #endif
-        
+
         
         // Load our CoreData container for Lyrics
         coreDataContainer = NSPersistentContainer(name: "Lyrics")
@@ -390,6 +390,9 @@ import MediaRemoteAdapter
             spotifySyncLog("fetchAllNetworkLyrics aborted: missing currentlyPlaying or name")
             return NetworkFetchReturn(lyrics: [], colorData: nil)
         }
+        if currentPlayer == .appleMusic {
+            return await fetchSearchBasedNetworkLyrics(trackID: currentlyPlaying, trackName: currentlyPlayingName)
+        }
         for networkLyricProvider in allNetworkLyricProviders {
             do {
                 spotifySyncLog("fetchAllNetworkLyrics provider=\(networkLyricProvider.providerName) start trackID=\(currentlyPlaying)")
@@ -413,6 +416,132 @@ import MediaRemoteAdapter
         }
         spotifySyncLog("fetchAllNetworkLyrics exhausted providers; returning empty")
         return NetworkFetchReturn(lyrics: [], colorData: nil)
+    }
+
+    private func fetchSearchBasedNetworkLyrics(trackID: String, trackName: String) async -> NetworkFetchReturn {
+        guard let artistName = currentlyPlayingArtist else {
+            spotifySyncLog("fetchSearchBasedNetworkLyrics aborted: missing artist")
+            return NetworkFetchReturn(lyrics: [], colorData: nil)
+        }
+
+        var searchResults: [SongResult] = []
+        let trackNameCandidates = titleSearchCandidates(for: trackName)
+        for lyricProvider in allNetworkLyricProvidersForSearch {
+            if Task.isCancelled {
+                return NetworkFetchReturn(lyrics: [], colorData: nil)
+            }
+            spotifySyncLog("fetchSearchBasedNetworkLyrics provider=\(lyricProvider.providerName) start trackID=\(trackID)")
+            var providerResults: [SongResult] = []
+            for candidateTrackName in trackNameCandidates {
+                if Task.isCancelled {
+                    return NetworkFetchReturn(lyrics: [], colorData: nil)
+                }
+                do {
+                    let results = try await lyricProvider.search(trackName: candidateTrackName, artistName: artistName)
+                    providerResults.append(contentsOf: results)
+                } catch {
+                    spotifySyncLog("fetchSearchBasedNetworkLyrics provider=\(lyricProvider.providerName) failed error=\(error)")
+                }
+            }
+            searchResults.append(contentsOf: providerResults.filter { isRelevantSearchResult($0, trackName: trackName, artistName: artistName) })
+            searchResults = deduplicatedSearchResults(searchResults).sorted {
+                searchResultRelevance($0, trackName: trackName, artistName: artistName) > searchResultRelevance($1, trackName: trackName, artistName: artistName)
+            }
+            if let bestResult = searchResults.first {
+                spotifySyncLog("fetchSearchBasedNetworkLyrics provider=\(lyricProvider.providerName) success count=\(bestResult.lyrics.count)")
+                let _ = SongObject(from: bestResult.lyrics, with: coreDataContainer.viewContext, trackID: trackID, trackName: trackName)
+                saveCoreData()
+                return NetworkFetchReturn(lyrics: bestResult.lyrics, colorData: nil)
+            }
+        }
+        spotifySyncLog("fetchSearchBasedNetworkLyrics exhausted providers; returning empty")
+        return NetworkFetchReturn(lyrics: [], colorData: nil)
+    }
+
+    private func deduplicatedSearchResults(_ results: [SongResult]) -> [SongResult] {
+        var seen: Set<String> = []
+        return results.filter { result in
+            let key = [
+                result.lyricType,
+                normalizedSearchMetadata(result.songName),
+                normalizedSearchMetadata(result.artistName),
+                normalizedSearchMetadata(result.albumName)
+            ].joined(separator: "|")
+            return seen.insert(key).inserted
+        }
+    }
+
+    private func isRelevantSearchResult(_ result: SongResult, trackName: String, artistName: String) -> Bool {
+        !result.lyrics.isEmpty && searchResultRelevance(result, trackName: trackName, artistName: artistName) > 0
+    }
+
+    private func searchResultRelevance(_ result: SongResult, trackName: String, artistName: String) -> Int {
+        let resultTitle = normalizedSearchMetadata(result.songName)
+        guard !resultTitle.isEmpty else {
+            return 0
+        }
+
+        let queryTitles = titleSearchCandidates(for: trackName)
+            .map(normalizedSearchMetadata)
+            .filter { !$0.isEmpty }
+        guard !queryTitles.isEmpty else {
+            return 0
+        }
+
+        let titleScore: Int
+        if queryTitles.contains(resultTitle) {
+            titleScore = 100
+        } else {
+            guard queryTitles.contains(where: { queryTitle in
+                let shorterCount = min(queryTitle.count, resultTitle.count)
+                let longerCount = max(queryTitle.count, resultTitle.count)
+                return shorterCount * 10 >= longerCount * 4
+                    && (queryTitle.contains(resultTitle) || resultTitle.contains(queryTitle))
+            }) else {
+                return 0
+            }
+            titleScore = 70
+        }
+
+        let queryArtist = normalizedSearchMetadata(artistName)
+        let resultArtist = normalizedSearchMetadata(result.artistName)
+        guard !queryArtist.isEmpty, !resultArtist.isEmpty else {
+            return titleScore
+        }
+        if queryArtist == resultArtist {
+            return titleScore + 30
+        }
+        if queryArtist.contains(resultArtist) || resultArtist.contains(queryArtist) {
+            return titleScore + 15
+        }
+        return titleScore
+    }
+
+    private func normalizedSearchMetadata(_ value: String) -> String {
+        value
+            .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
+            .unicodeScalars
+            .filter(CharacterSet.alphanumerics.contains)
+            .map(String.init)
+            .joined()
+    }
+
+    private func titleSearchCandidates(for title: String) -> [String] {
+        let stripped = title
+            .replacingOccurrences(
+                of: #"[\s　]*[\(\（\[\【].*?[\)\）\]\】][\s　]*"#,
+                with: " ",
+                options: .regularExpression
+            )
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return [title, stripped]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .reduce(into: []) { partialResult, candidate in
+                if !partialResult.contains(candidate) {
+                    partialResult.append(candidate)
+                }
+            }
     }
     
     #if os(macOS)
@@ -1569,6 +1698,10 @@ import MediaRemoteAdapter
             if let songObject = results.first {
                 // Found the SongObject with the matching trackID
                 let lyricsArray = zip(songObject.lyricsTimestamps, songObject.lyricsWords).map { LyricLine(startTime: $0, words: $1) }
+                guard !lyricsArray.isEmpty else {
+                    spotifySyncLog("fetchFromCoreData empty cache treated as miss trackID=\(trackID)")
+                    return nil
+                }
                 spotifySyncLog("fetchFromCoreData hit trackID=\(trackID) count=\(lyricsArray.count)")
                 return lyricsArray
             } else {
@@ -1802,11 +1935,21 @@ extension ViewModel {
         // Task cancelled means we're working with old song data, so dont update Spotify ID with old song's ID
         
         // search for equivalent spotify song
-        if let spotifyResult = try await musicToSpotifyHelper(
-            sourceTrackName: sourceTrackName,
-            sourceArtistName: sourceArtistName,
-            sourceAlbumName: sourceAlbumName
-        ) {
+        let spotifyResult: AppleMusicHelper?
+        do {
+            spotifyResult = try await musicToSpotifyHelper(
+                sourceTrackName: sourceTrackName,
+                sourceArtistName: sourceArtistName,
+                sourceAlbumName: sourceAlbumName
+            )
+        } catch let error as CancellationError {
+            throw error
+        } catch {
+            print("Apple Music Network Fetch: Spotify mapping failed; falling back to Apple Music alternative id. error=\(error)")
+            spotifyResult = nil
+        }
+
+        if let spotifyResult {
             try Task.checkCancellation()
             guard currentlyPlayingAppleMusicPersistentID == expectedPersistentID,
                   appleMusicPlayer.persistentID == expectedPersistentID else {

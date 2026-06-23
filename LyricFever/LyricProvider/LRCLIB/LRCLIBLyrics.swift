@@ -35,7 +35,7 @@ struct LRCLIBLyrics: Codable {
         
         for line in lines {
             // Use regex to match the timestamp and the lyrics
-            let regex = try! NSRegularExpression(pattern: #"\[(\d{2}:\d{2}\.\d{2})\]\s*(.*)"#)
+            let regex = try! NSRegularExpression(pattern: #"\[(\d{2}:\d{2}(?:\.\d{2,3})?)\]\s*(.*)"#)
             let matches = regex.matches(in: line, range: NSRange(line.startIndex..<line.endIndex, in: line))
             
             for match in matches {

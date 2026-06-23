@@ -180,7 +180,7 @@ struct SearchWindow: View {
     }
 
     private func isRelevantSearchResult(_ result: SongResult) -> Bool {
-        searchResultRelevance(result) > 0
+        !result.lyrics.isEmpty && searchResultRelevance(result) > 0
     }
 
     private func searchResultRelevance(_ result: SongResult) -> Int {
