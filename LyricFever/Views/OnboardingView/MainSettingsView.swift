@@ -145,16 +145,6 @@ struct MainSettingsView: View {
                             
                 permissionsOrNextButton
                     .frame(height: 40)
-                
-                VStack {
-                    Text("Email me at [aviwad@gmail.com](mailto:aviwad@gmail.com) for any support")
-                    Text(verbatim: "⚠️ Disclaimer: I do not own the rights to Spotify or the lyric content presented.\nMusixmatch and Spotify own all rights to the lyrics.\nTranslations by InTheManXG and ARui-tw")
-                    Text("[Lyric Fever GitHub](https://github.com/aviwad/LyricFever)\nVersion 3.3")
-                }
-                    .multilineTextAlignment(.center)
-                    .font(.callout)
-                    .padding(.top, 10)
-                    .frame(alignment: .bottom)
             }
             .animation(.bouncy, value: permissionDenied)
             .animation(.bouncy, value: error)
@@ -170,4 +160,3 @@ struct MainSettingsView: View {
         }
     }
 }
-

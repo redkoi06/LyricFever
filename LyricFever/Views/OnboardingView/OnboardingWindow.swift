@@ -30,6 +30,11 @@ struct OnboardingWindow: View {
                  .tabItem {
                      Label("Keyboard Shortcuts", systemImage: "keyboard")
                  }
+            OtherSettingsView()
+                .padding(.horizontal, 100)
+                 .tabItem {
+                     Label("其他", systemImage: "gearshape.2")
+                 }
         }
     }
 }

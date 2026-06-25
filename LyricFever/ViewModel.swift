@@ -112,6 +112,18 @@ import MediaRemoteAdapter
         formatter.zeroFormattingBehavior = [.pad]
         return formatter.string(from: TimeInterval(totalSeconds)) ?? "0:00"
     }
+
+    struct LyricCacheInfo: Equatable {
+        var byteCount: Int64
+        var songCount: Int
+        var lineCount: Int
+
+        static let empty = LyricCacheInfo(byteCount: 0, songCount: 0, lineCount: 0)
+
+        var formattedSize: String {
+            ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file)
+        }
+    }
     
     #if os(macOS)
     private static let karaokeFontNameKey = "karaokeFontName"
@@ -1781,6 +1793,57 @@ import MediaRemoteAdapter
         } catch {
             print("Error deleting data: \(error)")
         }
+    }
+
+    func currentLyricCacheInfo() -> LyricCacheInfo {
+        do {
+            return try calculateLyricCacheInfo()
+        } catch {
+            print("[LyricFever][CoreData] failed to calculate lyric cache size: \(error)")
+            return .empty
+        }
+    }
+
+    @discardableResult
+    func clearLyricCache() -> LyricCacheInfo {
+        do {
+            let context = coreDataContainer.viewContext
+            let fetchRequest: NSFetchRequest<SongObject> = SongObject.fetchRequest()
+            let objects = try context.fetch(fetchRequest)
+            for object in objects {
+                context.delete(object)
+            }
+            if context.hasChanges {
+                try context.save()
+            }
+            return .empty
+        } catch {
+            print("[LyricFever][CoreData] failed to clear lyric cache: \(error)")
+            return currentLyricCacheInfo()
+        }
+    }
+
+    private func calculateLyricCacheInfo() throws -> LyricCacheInfo {
+        let fetchRequest: NSFetchRequest<SongObject> = SongObject.fetchRequest()
+        let objects = try coreDataContainer.viewContext.fetch(fetchRequest)
+        var byteCount: Int64 = 0
+        var songCount = 0
+        var lineCount = 0
+
+        for object in objects {
+            let words = object.lyricsWords
+            let timestamps = object.lyricsTimestamps
+            guard !words.isEmpty || !timestamps.isEmpty else { continue }
+
+            songCount += 1
+            lineCount += max(words.count, timestamps.count)
+            byteCount += words.reduce(into: Int64(0)) { partialResult, lyric in
+                partialResult += Int64(lyric.lengthOfBytes(using: .utf8))
+            }
+            byteCount += Int64(timestamps.count * MemoryLayout<TimeInterval>.size)
+        }
+
+        return LyricCacheInfo(byteCount: byteCount, songCount: songCount, lineCount: lineCount)
     }
     
     func fetchFromCoreData(for trackID: String) -> [LyricLine]? {
