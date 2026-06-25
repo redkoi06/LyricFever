@@ -240,6 +240,8 @@ import MediaRemoteAdapter
     private var lastAppleMusicWatchdogPosition: TimeInterval?
     private var lastSpotifyWatchdogTrackID: String?
     private var lastSpotifyWatchdogPosition: TimeInterval?
+    private let appleMusicLyricResyncTolerance: TimeInterval = 2_000
+    private let appleMusicPositionJumpTolerance: TimeInterval = 3_000
     private let spotifyEmptyLyricsRetryLimit = 2
     private let spotifyEmptyLyricsRetryDelay: UInt64 = 3_000_000_000
     var isFetching = false
@@ -1072,6 +1074,7 @@ import MediaRemoteAdapter
         let position = appleMusicPlayer.currentTime
         let playerIsPlaying = appleMusicPlayer.isPlaying
         isPlaying = playerIsPlaying
+        let sameTrack = trackID != nil && lastAppleMusicWatchdogTrackID == trackID
 
         guard playerIsPlaying else {
             lastAppleMusicWatchdogTrackID = trackID
@@ -1084,28 +1087,23 @@ import MediaRemoteAdapter
         }
 
         let positionJumpedBackward: Bool
-        if lastAppleMusicWatchdogTrackID == trackID,
+        let positionJumpedForward: Bool
+        if sameTrack,
            let previousPosition = lastAppleMusicWatchdogPosition,
            let position {
             positionJumpedBackward = previousPosition > 10_000
                 && position + 5_000 < previousPosition
+            positionJumpedForward = position > previousPosition + appleMusicPositionJumpTolerance
         } else {
             positionJumpedBackward = false
+            positionJumpedForward = false
         }
 
-        let lyricIndexIsAheadOfPlayback: Bool
-        if let index = currentlyPlayingLyricsIndex,
-           currentlyPlayingLyrics.indices.contains(index),
-           let position {
-            lyricIndexIsAheadOfPlayback = position + 1_000
-                < currentlyPlayingLyrics[index].startTimeMS
-        } else {
-            lyricIndexIsAheadOfPlayback = false
-        }
+        let lyricIndexIsOutOfSync = position.map(appleMusicLyricIndexIsOutOfSync) ?? false
 
-        if lastAppleMusicWatchdogTrackID == trackID,
+        if sameTrack,
            !currentlyPlayingLyrics.isEmpty,
-           positionJumpedBackward || lyricIndexIsAheadOfPlayback {
+           positionJumpedBackward || positionJumpedForward || lyricIndexIsOutOfSync {
             let previousDescription = lastAppleMusicWatchdogPosition.map { String($0) } ?? "nil"
             let positionDescription = position.map { String($0) } ?? "nil"
             let indexDescription = currentlyPlayingLyricsIndex.map { String($0) } ?? "nil"
@@ -1113,14 +1111,39 @@ import MediaRemoteAdapter
                   + "previous=\(previousDescription) "
                   + "current=\(positionDescription) "
                   + "index=\(indexDescription)")
-            currentlyPlayingLyricsIndex = nil
-            if showLyrics, userDefaultStorage.hasOnboarded {
-                startLyricUpdater()
-            }
+            resyncAppleMusicLyricsFromPlaybackPosition()
         }
 
         lastAppleMusicWatchdogTrackID = trackID
         lastAppleMusicWatchdogPosition = position
+    }
+
+    private func appleMusicLyricIndexIsOutOfSync(position: TimeInterval) -> Bool {
+        guard let index = currentlyPlayingLyricsIndex,
+              currentlyPlayingLyrics.indices.contains(index) else {
+            return false
+        }
+
+        let currentStart = currentlyPlayingLyrics[index].startTimeMS
+        if position + appleMusicLyricResyncTolerance < currentStart {
+            return true
+        }
+
+        let nextIndex = index + 1
+        guard currentlyPlayingLyrics.indices.contains(nextIndex) else {
+            return false
+        }
+
+        let nextStart = currentlyPlayingLyrics[nextIndex].startTimeMS
+        return position > nextStart + appleMusicLyricResyncTolerance
+    }
+
+    private func resyncAppleMusicLyricsFromPlaybackPosition() {
+        currentlyPlayingLyricsIndex = nil
+        stopLyricUpdater()
+        if showLyrics, userDefaultStorage.hasOnboarded, isPlaying {
+            startLyricUpdater(runSpotifyDriftFix: false)
+        }
     }
 
     @discardableResult
@@ -1148,6 +1171,7 @@ import MediaRemoteAdapter
         if trackChanged {
             currentAppleMusicFetchTask?.cancel()
             currentlyPlaying = nil
+            clearAppleMusicLyricsForTrackChange()
         }
 
         currentlyPlayingName = trackName
@@ -1163,6 +1187,16 @@ import MediaRemoteAdapter
             print("[LyricFever][AppleMusicSync] corrected source metadata name=\(trackName)")
         }
         return trackChanged || metadataChanged
+    }
+
+    private func clearAppleMusicLyricsForTrackChange() {
+        stopLyricUpdater()
+        currentlyPlayingLyricsIndex = nil
+        currentlyPlayingLyrics = []
+        translatedLyric = []
+        resetRomanization()
+        chineseConversionLyrics = []
+        lyricsIsEmptyPostLoad = true
     }
 
     private func handleAppleMusicUnavailable() {

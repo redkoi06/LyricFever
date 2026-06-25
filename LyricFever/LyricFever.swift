@@ -8,6 +8,7 @@
 import SwiftUI
 import Translation
 import LaunchAtLogin
+import MenuBarExtraAccess
 
 extension NSScreen {
     static var mainWidth: CGFloat {
@@ -26,6 +27,8 @@ enum MusicType {
 @main
 struct LyricFever: App {
     @State var viewmodel = ViewModel.shared
+    @State private var isMenubarPresented = false
+    @State private var menubarStatusItemController = MenubarStatusItemController()
     @Environment(\.openWindow) var openWindow
     @Environment(\.openURL) var openURL
     
@@ -36,7 +39,7 @@ struct LyricFever: App {
                 .environment(viewmodel)
         } label: {
             // Text(Image) Doesn't render propertly in MenubarExtra. Stupid Apple. Must resort to if/else
-            MenubarLabelView()
+            MenubarLabelView(statusItemController: menubarStatusItemController)
                 .environment(viewmodel)
             .task(id: viewmodel.currentlyPlaying) {
                 if viewmodel.currentPlayer == .appleMusic {
@@ -173,6 +176,9 @@ struct LyricFever: App {
                     await viewmodel.onCurrentlyPlayingIDChange()
                 }
             }
+        }
+        .menuBarExtraAccess(isPresented: $isMenubarPresented) { statusItem in
+            menubarStatusItemController.attach(statusItem)
         }
         .menuBarExtraStyle(.window)
         Window("Lyric Fever: Fullscreen", id: "fullscreen") {

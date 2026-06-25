@@ -18,6 +18,10 @@ struct MenubarWindowView: View {
     @State var currentHoveredItem = MenubarButtonHighlight.none
     @State var supportedLanguages: [Locale.Language] = []
     @State private var showOtherOptionsPopover = false
+
+    private var menubarDisplayLength: Int {
+        min(max(viewmodel.userDefaultStorage.truncationLength, 10), 20)
+    }
     
     @ViewBuilder
     var profilePicViewHeaderView: some View {
@@ -521,9 +525,9 @@ struct MenubarWindowView: View {
                 optionSliderRow(
                     title: "菜单栏显示长度",
                     systemImage: "textformat.size",
-                    valueText: "\(viewmodel.userDefaultStorage.truncationLength)",
+                    valueText: "\(menubarDisplayLength)",
                     slider: AnyView(
-                        Slider(value: menubarSizeSliderBinding, in: 10...60)
+                        Slider(value: menubarSizeSliderBinding, in: 10...20, step: 1)
                     )
                 )
                 optionSliderRow(
@@ -581,7 +585,10 @@ struct MenubarWindowView: View {
         .environment(\.colorScheme, .dark)
         .padding(16)
         .frame(width: 320)
-        .background(.ultraThinMaterial)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(red: 0.13, green: 0.13, blue: 0.15))
+        )
     }
 
     private func optionSliderRow(title: LocalizedStringKey, systemImage: String, valueText: String, slider: AnyView) -> some View {
@@ -650,11 +657,9 @@ struct MenubarWindowView: View {
     
     var menubarSizeSliderBinding: Binding<Double> {
         Binding (
-            get: { Double(viewmodel.userDefaultStorage.truncationLength) },
+            get: { Double(menubarDisplayLength) },
             set: { newValue in
-                let steps = [10, 20, 30, 40, 50, 60]
-                let closest = steps.min(by: { abs(Double($0) - newValue) < abs(Double($1) - newValue) }) ?? 40
-                viewmodel.userDefaultStorage.truncationLength = closest
+                viewmodel.userDefaultStorage.truncationLength = min(max(Int(round(newValue)), 10), 20)
             }
         )
     }
@@ -694,20 +699,20 @@ struct MenubarWindowView: View {
                 .frame(width: 30)
             Group {
                 if #available(macOS 26.0, *) {
-                    Slider(value: menubarSizeSliderBinding, in: 10...60) {
+                    Slider(value: menubarSizeSliderBinding, in: 10...20) {
                         Text("Menubar Size")
                     } ticks: {
 
                     }
                 } else {
-                    Slider(value: menubarSizeSliderBinding, in: 10...60, step: 10) {
+                    Slider(value: menubarSizeSliderBinding, in: 10...20, step: 1) {
                         Text("Menubar Size")
                     }
                 }
             }
             .labelsHidden()
             .frame(width: 160)
-            Text("\(viewmodel.userDefaultStorage.truncationLength)")
+            Text("\(menubarDisplayLength)")
                 .frame(width: 23)
         }
         .tint(.secondary)

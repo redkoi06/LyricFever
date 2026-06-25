@@ -11,23 +11,23 @@ import SwiftUI
 
 struct FinalTruncationView: View {
     @Environment(\.dismiss) var dismiss
-    //@AppStorage("truncationLength") var truncationLength: Int = 40
-    @State var truncationLength: Int = UserDefaults.standard.integer(forKey: "truncationLength")
+    @State var truncationLength: Int = min(max(UserDefaults.standard.integer(forKey: "truncationLength"), 10), 20)
     @Environment(\.controlActiveState) var controlActiveState
-    let allTruncations = [30,40,50,60]
+    let allTruncations = Array(10...20)
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             StepView(title: "Set the Lyric Size", description: "This depends on how much free space you have in your menu bar!")
             
             HStack {
                 Spacer()
-                Image("\(truncationLength)")
-                    .resizable()
-                    .scaledToFit()
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                Text("\(truncationLength)")
+                    .font(.system(size: 42, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .frame(width: 120, height: 72)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
                     .onAppear() {
                         if truncationLength == 0 {
-                            truncationLength = 40
+                            truncationLength = 10
                         }
                     }
                 Spacer()
