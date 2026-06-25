@@ -510,7 +510,6 @@ struct MenubarWindowView: View {
              }
             Toggle("AirPlay Audio Delay", isOn: $viewmodel.airplayDelay)
                 .disabled(!viewmodel.userDefaultStorage.hasOnboarded)
-            Divider()
         }
     }
     
@@ -524,7 +523,7 @@ struct MenubarWindowView: View {
                     systemImage: "textformat.size",
                     valueText: "\(viewmodel.userDefaultStorage.truncationLength)",
                     slider: AnyView(
-                        Slider(value: menubarSizeSliderBinding, in: 30...60)
+                        Slider(value: menubarSizeSliderBinding, in: 10...60)
                     )
                 )
                 optionSliderRow(
@@ -559,10 +558,12 @@ struct MenubarWindowView: View {
 
             streamingDelayView
 
-            Divider()
+            if viewmodel.currentPlayer == .spotify {
+                Divider()
+            }
 
             VStack(alignment: .leading, spacing: 10) {
-                Button("设置（新增 K 歌设置）") {
+                Button("设置") {
                     openWindow(id: "onboarding")
                     NSApplication.shared.activate(ignoringOtherApps: true)
                     NotificationCenter.default.post(name: Notification.Name("didClickSettings"), object: nil)
@@ -573,17 +574,6 @@ struct MenubarWindowView: View {
                 LaunchAtLogin.Toggle(String(localized: "Launch at Login"))
                     .disabled(!viewmodel.userDefaultStorage.hasOnboarded)
                     .keyboardShortcut("l")
-
-                Button("检查更新...") {
-                    viewmodel.updaterService.updaterController.checkForUpdates(nil)
-                }
-                .keyboardShortcut("u")
-                .buttonStyle(.borderless)
-
-                Button("Buy Me A Beer (Thank You)!") {
-                    openURL(URL(string: "https://buymeacoffee.com/aviwadhwalyricfever")!)
-                }
-                .buttonStyle(.borderless)
             }
         }
         .tint(viewmodel.currentBackground ?? .accentColor)
@@ -662,7 +652,7 @@ struct MenubarWindowView: View {
         Binding (
             get: { Double(viewmodel.userDefaultStorage.truncationLength) },
             set: { newValue in
-                let steps = [30, 40, 50, 60]
+                let steps = [10, 20, 30, 40, 50, 60]
                 let closest = steps.min(by: { abs(Double($0) - newValue) < abs(Double($1) - newValue) }) ?? 40
                 viewmodel.userDefaultStorage.truncationLength = closest
             }
@@ -704,13 +694,13 @@ struct MenubarWindowView: View {
                 .frame(width: 30)
             Group {
                 if #available(macOS 26.0, *) {
-                    Slider(value: menubarSizeSliderBinding, in: 30...60) {
+                    Slider(value: menubarSizeSliderBinding, in: 10...60) {
                         Text("Menubar Size")
                     } ticks: {
 
                     }
                 } else {
-                    Slider(value: menubarSizeSliderBinding, in: 30...60, step: 10) {
+                    Slider(value: menubarSizeSliderBinding, in: 10...60, step: 10) {
                         Text("Menubar Size")
                     }
                 }

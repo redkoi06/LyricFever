@@ -9,58 +9,90 @@ import SwiftUI
 
 struct MenubarLabelView: View {
     @Environment(ViewModel.self) var viewmodel
-    
-    var menuBarTitle: String? {
-        // Update message takes priority
-        if viewmodel.mustUpdateUrgent {
-            return String(localized: "⚠️ Please Update (Click Check Updates)")
-        } else if viewmodel.userDefaultStorage.hasOnboarded {
-            // Try to work through lyric logic if onboarded
-            // NEW: Revert to song name if fullscreen / karaoke activated
-            if !viewmodel.fullscreen,
-               !viewmodel.userDefaultStorage.karaoke,
-               viewmodel.isPlaying,
-               viewmodel.showLyrics,
-               let currentlyPlayingLyricsIndex = viewmodel.currentlyPlayingLyricsIndex,
-               let currentLyric = viewmodel.currentlyPlayingLyrics[safe: currentlyPlayingLyricsIndex] {
-                // Attempt to display translations
-                if let translatedLyric = viewmodel.translatedLyric[safe: currentlyPlayingLyricsIndex] {
-                    // I don't localize, because I deliver the lyric verbatim
-                    return translatedLyric
-                } else {
-                    // Attempt to display Romanization
-                    if viewmodel.userDefaultStorage.romanize,
-                       let romanizedLyric = viewmodel.romanizedLyric(at: currentlyPlayingLyricsIndex) {
-                        return romanizedLyric
-                    } else if let convertedLyric = viewmodel.chineseConversionLyrics[safe: currentlyPlayingLyricsIndex] {
-                        return convertedLyric
-                    } else {
-                        return currentLyric.words
-                    }
-                }
-            // Backup: Display name and artist
-            } else if viewmodel.userDefaultStorage.showSongDetailsInMenubar, let currentlyPlayingName = viewmodel.currentlyPlayingName, let currentlyPlayingArtist = viewmodel.currentlyPlayingArtist {
-                if viewmodel.isPlaying {
-                    return String(localized: "Now Playing: \(currentlyPlayingName) - \(currentlyPlayingArtist)")
-                } else {
-                    return String(localized: "Now Paused: \(currentlyPlayingName) - \(currentlyPlayingArtist)")
-                }
-            }
-            // Onboarded but app is not open
+
+    private enum LabelContent {
+        case icon(String)
+        case text(String)
+    }
+
+    private var truncationLength: Int {
+        max(viewmodel.userDefaultStorage.truncationLength, 1)
+    }
+
+    private func displayableLyric(_ lyric: String?) -> String? {
+        guard let lyric else {
             return nil
+        }
+        let trimmed = lyric.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+        let musicalPlaceholders = CharacterSet(charactersIn: "♪♫♩♬")
+        guard !trimmed.unicodeScalars.allSatisfy({
+            musicalPlaceholders.contains($0) || CharacterSet.whitespacesAndNewlines.contains($0)
+        }) else {
+            return nil
+        }
+        return trimmed
+    }
+
+    private var currentLyricText: String? {
+        guard !viewmodel.fullscreen,
+              !viewmodel.userDefaultStorage.karaoke,
+              viewmodel.isPlaying,
+              viewmodel.showLyrics,
+              let currentlyPlayingLyricsIndex = viewmodel.currentlyPlayingLyricsIndex,
+              let currentLyric = viewmodel.currentlyPlayingLyrics[safe: currentlyPlayingLyricsIndex] else {
+            return nil
+        }
+
+        if let translatedLyric = displayableLyric(
+            viewmodel.translatedLyric[safe: currentlyPlayingLyricsIndex]
+        ) {
+            return translatedLyric
+        }
+
+        if viewmodel.userDefaultStorage.romanize,
+           let romanizedLyric = displayableLyric(
+            viewmodel.romanizedLyric(at: currentlyPlayingLyricsIndex)
+           ) {
+            return romanizedLyric
+        }
+
+        if let convertedLyric = displayableLyric(
+            viewmodel.chineseConversionLyrics[safe: currentlyPlayingLyricsIndex]
+        ) {
+            return convertedLyric
+        }
+
+        return displayableLyric(currentLyric.words)
+    }
+
+    private var labelContent: LabelContent {
+        if viewmodel.mustUpdateUrgent {
+            return .text(String(localized: "⚠️ Please Update (Click Check Updates)"))
+        } else if !viewmodel.userDefaultStorage.hasOnboarded {
+            return .text(String(localized: "⚠️ Complete Setup (Click Settings)"))
+        } else if let currentLyricText {
+            return .text(currentLyricText)
+        } else if viewmodel.isPlaying {
+            return .icon("music.note")
+        } else if viewmodel.userDefaultStorage.showSongDetailsInMenubar,
+                  let currentlyPlayingName = viewmodel.currentlyPlayingName,
+                  let currentlyPlayingArtist = viewmodel.currentlyPlayingArtist {
+            return .text(String(localized: "Now Paused: \(currentlyPlayingName) - \(currentlyPlayingArtist)"))
         } else {
-            // Hasn't onboarded
-            return String(localized: "⚠️ Complete Setup (Click Settings)")
+            return .icon("music.note.list")
         }
     }
 
     var body: some View {
-        Group {
-            if let menuBarTitle {
-                Text(menuBarTitle.trunc())
-            } else {
-                Image(systemName: "music.note.list")
-            }
+        switch labelContent {
+        case .icon(let systemName):
+            Image(systemName: systemName)
+        case .text(let text):
+            Text(verbatim: text.trunc(length: truncationLength))
+                .lineLimit(1)
         }
     }
 }

@@ -74,6 +74,24 @@ import MediaRemoteAdapter
         }
         musicController.startListening()
     }
+
+    #if os(macOS)
+    private func observeAppleMusicLifecycle() {
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didTerminateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  app.bundleIdentifier == "com.apple.Music" else {
+                return
+            }
+            Task { @MainActor in
+                self?.handleAppleMusicUnavailable()
+            }
+        }
+    }
+    #endif
     
     func formattedCurrentTime(for date: Date) -> String {
         let baseTime = currentTime.currentTime
@@ -325,6 +343,9 @@ import MediaRemoteAdapter
         coreDataContainer = NSPersistentContainer(name: "Lyrics")
         
         initAppleMusicWorkaround()
+        #if os(macOS)
+        observeAppleMusicLifecycle()
+        #endif
         
         coreDataContainer.loadPersistentStores { description, error in
             if let error = error {
@@ -797,6 +818,15 @@ import MediaRemoteAdapter
         guard currentPlayer == .appleMusic else {
             return
         }
+        let playerState = notification.userInfo?["Player State"] as? String
+        if playerState == "Stopped" {
+            handleAppleMusicUnavailable()
+            return
+        }
+        guard appleMusicPlayer.isRunning else {
+            handleAppleMusicUnavailable()
+            return
+        }
         ensureAppleMusicWatchdog()
         if appleMusicPlayer.isPlaying {
             print("is playing")
@@ -1033,6 +1063,7 @@ import MediaRemoteAdapter
             return
         }
         guard appleMusicPlayer.isRunning else {
+            handleAppleMusicUnavailable()
             return
         }
 
@@ -1094,8 +1125,14 @@ import MediaRemoteAdapter
 
     @discardableResult
     func refreshAppleMusicMetadataFromPlayer() -> Bool {
-        guard currentPlayer == .appleMusic,
-              let trackID = appleMusicPlayer.persistentID,
+        guard currentPlayer == .appleMusic else {
+            return false
+        }
+        guard appleMusicPlayer.isRunning else {
+            handleAppleMusicUnavailable()
+            return false
+        }
+        guard let trackID = appleMusicPlayer.persistentID,
               let trackName = appleMusicPlayer.trackName,
               !trackName.isEmpty else {
             return false
@@ -1126,6 +1163,25 @@ import MediaRemoteAdapter
             print("[LyricFever][AppleMusicSync] corrected source metadata name=\(trackName)")
         }
         return trackChanged || metadataChanged
+    }
+
+    private func handleAppleMusicUnavailable() {
+        guard currentPlayer == .appleMusic else {
+            return
+        }
+        currentAppleMusicWatchdogTask?.cancel()
+        currentAppleMusicWatchdogTask = nil
+        currentAppleMusicFetchTask?.cancel()
+        currentAppleMusicFetchTask = nil
+        isPlaying = false
+        currentlyPlaying = nil
+        currentlyPlayingName = nil
+        currentlyPlayingArtist = nil
+        currentAlbumName = nil
+        currentlyPlayingAppleMusicPersistentID = nil
+        lastAppleMusicWatchdogTrackID = nil
+        lastAppleMusicWatchdogPosition = nil
+        stopLyricUpdater()
     }
 
     private func ensureSpotifyWatchdog() {
@@ -1328,6 +1384,10 @@ import MediaRemoteAdapter
     private func setCurrentProperties() {
         switch currentPlayer {
             case .appleMusic:
+                guard appleMusicPlayer.isRunning else {
+                    handleAppleMusicUnavailable()
+                    return
+                }
                 if let currentTrackName = appleMusicPlayer.trackName, let currentArtistName = appleMusicPlayer.artistName, let duration = appleMusicPlayer.duration, let currentAlbumName = appleMusicPlayer.albumName {
                     // Don't set currentlyPlaying here: the persistentID change triggers the appleMusicFetch which will set spotify's currentlyPlaying
                     if currentTrackName == "" {
@@ -1828,9 +1888,13 @@ extension ViewModel {
     func appleMusicStarter() async {
         print("apple music test called again, cancelling previous")
         currentAppleMusicFetchTask?.cancel()
-        guard let expectedPersistentID = currentlyPlayingAppleMusicPersistentID,
+        guard appleMusicPlayer.isRunning,
+              let expectedPersistentID = currentlyPlayingAppleMusicPersistentID,
               let sourceTrackName = appleMusicPlayer.trackName,
               let sourceArtistName = appleMusicPlayer.artistName else {
+            if !appleMusicPlayer.isRunning {
+                handleAppleMusicUnavailable()
+            }
             return
         }
         let sourceAlbumName = appleMusicPlayer.albumName
