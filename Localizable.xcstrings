@@ -67,45 +67,6 @@
         }
       }
     },
-    "[Lyric Fever GitHub](https://github.com/aviwad/LyricFever)\nVersion 3.0" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[Lyric Fever GitHub](https://github.com/aviwad/LyricFever)\nVersion 3.0"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[Lyric Fever GitHub](https://github.com/aviwad/LyricFever)\n版本 3.0"
-          }
-        },
-        "zh-Hant-HK" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[Lyric Fever GitHub](https://github.com/aviwad/LyricFever)\n版本 3.0"
-          }
-        }
-      }
-    },
-    "[Lyric Fever GitHub](https://github.com/aviwad/LyricFever)\nVersion 3.3" : {
-      "localizations" : {
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[Lyric Fever GitHub](https://github.com/aviwad/LyricFever)\n版本 3.3"
-          }
-        },
-        "zh-Hant-HK" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[Lyric Fever GitHub](https://github.com/aviwad/LyricFever)\n版本 3.3"
-          }
-        }
-      }
-    },
     "%@s" : {
       "localizations" : {
         "zh-Hans" : {
@@ -744,28 +705,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "完成"
-          }
-        }
-      }
-    },
-    "Email me at [aviwad@gmail.com](mailto:aviwad@gmail.com) for any support" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "如需任何支持，请发送电子邮件至[aviwad@gmail.com](mailto:aviwad@gmail.com)以联系我"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "若需任何支援，請寄送電子郵件至：[aviwad@gmail.com](mailto:aviwad@gmail.com)"
-          }
-        },
-        "zh-Hant-HK" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "有任何問題，請電郵我 [aviwad@gmail.com](mailto:aviwad@gmail.com)"
           }
         }
       }
@@ -2884,28 +2823,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "翻譯失敗"
-          }
-        }
-      }
-    },
-    "Translation Help" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "翻译帮助"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "幫忙翻譯"
-          }
-        },
-        "zh-Hant-HK" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "翻譯指引"
           }
         }
       }

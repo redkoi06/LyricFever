@@ -2,7 +2,6 @@
 //  AppleMusicScripting.swift
 //  Lyric Fever
 //
-//  Created by Avi Wadhwa on 05/04/24.
 // Taken from Jukebox https://github.com/Jaysce/Jukebox/blob/main/Jukebox/ScriptingBridge/MusicApplication.swift
 
 

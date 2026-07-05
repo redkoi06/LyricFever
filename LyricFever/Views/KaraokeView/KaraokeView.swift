@@ -2,7 +2,6 @@
 //  KaraokeView.swift
 //  Lyric Fever
 //
-//  Created by Avi Wadhwa on 2024-10-08.
 //
 
 import SwiftUI

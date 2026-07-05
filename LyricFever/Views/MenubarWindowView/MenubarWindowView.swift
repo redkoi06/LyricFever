@@ -2,7 +2,6 @@
 //  MenubarWindowView.swift
 //  Lyric Fever
 //
-//  Created by Avi Wadhwa on 2025-07-26.
 //
 
 import SwiftUI
@@ -10,7 +9,6 @@ import LaunchAtLogin
 import Translation
 
 struct MenubarWindowView: View {
-    @Environment(\.openURL) var openURL
     @Environment(\.openWindow) var openWindow
     @Environment(ViewModel.self) var viewmodel
     @Environment(\.dismiss) var dismiss
@@ -18,6 +16,7 @@ struct MenubarWindowView: View {
     @State var currentHoveredItem = MenubarButtonHighlight.none
     @State var supportedLanguages: [Locale.Language] = []
     @State private var showOtherOptionsPopover = false
+    @State private var isSettingsButtonHovered = false
 
     private var menubarDisplayLength: Int {
         min(max(viewmodel.userDefaultStorage.truncationLength, 10), 20)
@@ -126,22 +125,6 @@ struct MenubarWindowView: View {
             VStack {
                 HStack {
                     songDetails
-//                    LikeButton()
-//                        .task(id: viewmodel.currentlyPlaying) {
-//                            guard let currentlyPlaying = viewmodel.currentlyPlaying else {
-//                                print("Ignoring nil currentlyPlaying for heart check")
-//                                return
-//                            }
-//                            print("Task to check if \(viewmodel.currentlyPlaying) is hearted")
-//                            do {
-//                                viewmodel.isHearted = try await viewmodel.spotifyLyricProvider.checkHeartedStatusFor(trackID: currentlyPlaying)
-//                            } catch {
-//                                print(error)
-//                            }
-//                        }
-//                        .onHover { isHovering in
-//                            currentHoveredItem = isHovering ? (viewmodel.isHearted ? .unheart : .heart) : .none
-//                        }
                 }
                 songControls
                 
@@ -236,11 +219,6 @@ struct MenubarWindowView: View {
         Section("Translation Options") {
             if viewmodel.userDefaultStorage.translate {
                 Text(!viewmodel.translatedLyric.isEmpty ? "Translated Lyrics 😃" : "No Translation ☹️")
-                if viewmodel.translatedLyric.isEmpty {
-                    Button("Translation Help") {
-                        openURL(URL(string: "https://aviwadhwa.com/TranslationHelp")!)
-                    }
-                }
             }
             
             Toggle("Translate To \(viewmodel.userLocaleLanguageString)", isOn: $viewmodel.userDefaultStorage.translate)
@@ -303,8 +281,6 @@ struct MenubarWindowView: View {
         }
         Section("Transliteration Options") {
             Toggle("Romanize", isOn: $viewmodel.userDefaultStorage.romanize)
-//            Toggle("Romanize Song Details", isOn: $viewmodel.userDefaultStorage.romanizeMetadata)
-//                .disabled(!viewmodel.userDefaultStorage.romanize)
             Picker("Chinese Conversion", selection: $viewmodel.userDefaultStorage.chinesePreference) {
                 ForEach(ChineseConversion.allCases) { conversionCase in
                     Text(conversionCase.description).tag(conversionCase.rawValue)
@@ -312,13 +288,6 @@ struct MenubarWindowView: View {
             }
         }
     }
-    
-    @ViewBuilder
-    var spotifyConnectDelayPicker: some View {
-        Text("TODO")
-    }
-    
-    
     var displayFullscreen: ButtonState {
         if !viewmodel.userDefaultStorage.hasOnboarded {
             return .disabled
@@ -544,18 +513,6 @@ struct MenubarWindowView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 Toggle("在菜单栏显示歌曲详情", isOn: $viewmodel.userDefaultStorage.showSongDetailsInMenubar)
-                Toggle("Screen Edge Visualizer", isOn: $viewmodel.userDefaultStorage.edgeVisualizerEnabled)
-
-                if let edgeVisualizerStatus = viewmodel.edgeVisualizerStatus {
-                    Text(edgeVisualizerStatus)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Button("Open Privacy Settings") {
-                        viewmodel.openScreenRecordingSettings()
-                    }
-                    .buttonStyle(.borderless)
-                }
             }
 
             Divider()
@@ -567,13 +524,38 @@ struct MenubarWindowView: View {
             }
 
             VStack(alignment: .leading, spacing: 10) {
-                Button("设置") {
+                Button {
                     openWindow(id: "onboarding")
                     NSApplication.shared.activate(ignoringOtherApps: true)
                     NotificationCenter.default.post(name: Notification.Name("didClickSettings"), object: nil)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "gearshape.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("打开设置")
+                            .font(.system(size: 13, weight: .semibold))
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .bold))
+                            .opacity(0.7)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundStyle(.white)
+                    .background(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(Color.white.opacity(isSettingsButtonHovered ? 0.16 : 0.10))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .stroke(Color.white.opacity(isSettingsButtonHovered ? 0.26 : 0.14), lineWidth: 1)
+                    )
                 }
                 .keyboardShortcut("s")
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
+                .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .onHover { isSettingsButtonHovered = $0 }
 
                 LaunchAtLogin.Toggle(String(localized: "Launch at Login"))
                     .disabled(!viewmodel.userDefaultStorage.hasOnboarded)

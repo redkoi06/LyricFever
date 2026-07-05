@@ -2,7 +2,6 @@
 //  NetEaseLyrics.swift
 //  Lyric Fever
 //
-//  Created by Avi Wadhwa on 2025-08-05.
 //
 
 // From LyricsX: NetEase. Adapted for my needs

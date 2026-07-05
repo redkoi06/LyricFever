@@ -2,7 +2,6 @@
 //  SongResult.swift
 //  Lyric Fever
 //
-//  Created by Avi Wadhwa on 2025-09-06.
 //
 
 import Foundation

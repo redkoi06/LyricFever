@@ -2,7 +2,6 @@
 //  OnboardingWindow.swift
 //  SpotifyLyricsInMenubar
 //
-//  Created by Avi Wadhwa on 01/09/23.
 //
 
 import SwiftUI

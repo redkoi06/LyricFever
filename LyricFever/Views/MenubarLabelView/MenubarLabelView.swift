@@ -2,7 +2,6 @@
 //  MenubarLabelView.swift
 //  Lyric Fever
 //
-//  Created by Avi Wadhwa on 2025-08-05.
 //
 
 import AppKit
@@ -82,9 +81,7 @@ struct MenubarLabelView: View {
     }
 
     private var labelContent: MenubarStatusLabelContent {
-        if viewmodel.mustUpdateUrgent {
-            return .text(String(localized: "⚠️ Please Update (Click Check Updates)"))
-        } else if !viewmodel.userDefaultStorage.hasOnboarded {
+        if !viewmodel.userDefaultStorage.hasOnboarded {
             return .text(String(localized: "⚠️ Complete Setup (Click Settings)"))
         } else if let currentLyricText {
             return .lyric(currentLyricText)

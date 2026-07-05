@@ -2,7 +2,6 @@
 //  KaraokeSettings.swift
 //  Lyric Fever
 //
-//  Created by Avi Wadhwa on 2025-02-08.
 //
 
 import SwiftUI
@@ -42,7 +41,7 @@ struct KaraokeSettingsView: View {
             }
             .toggleStyle(.checkbox)
             Toggle(isOn: $karaokeShowRomanization) {
-                Text("Show romanization below lyrics in Karaoke window")
+                Text("在歌词下方显示罗马音")
             }
             .toggleStyle(.checkbox)
             .padding(.bottom, 20)

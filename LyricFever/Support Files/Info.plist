@@ -4,22 +4,6 @@
 <dict>
 	<key></key>
 	<string></string>
-	<key>NSScreenCaptureUsageDescription</key>
-	<string>Lyric Fever captures system audio with ScreenCaptureKit to animate the screen edge visualizer.</string>
-	<key>SUAllowsAutomaticUpdates</key>
-	<true/>
-	<key>SUAutomaticallyUpdate</key>
-	<true/>
-	<key>SUEnableAutomaticChecks</key>
-	<true/>
-	<key>SUEnableDownloaderService</key>
-	<false/>
-	<key>SUEnableInstallerLauncherService</key>
-	<true/>
-	<key>SUFeedURL</key>
-	<string>https://aviwad.github.io/SpotifyLyricsInMenubar/appcast.xml</string>
-	<key>SUPublicEDKey</key>
-	<string>FSX9uBGItlJwhydb/y9bFiAoZKFy1YaTjgiR/0bcVbI=</string>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>

@@ -2,7 +2,6 @@
 //  viewModel.swift
 //  SpotifyLyricsInMenubar
 //
-//  Created by Avi Wadhwa on 14/08/23.
 //
 
 import Foundation
@@ -134,7 +133,6 @@ import MediaRemoteAdapter
         ?? NSFont.systemFont(ofSize: 14, weight: .medium)
     }
 
-    var updaterService = UpdaterService()
     var appleMusicPlayer = AppleMusicPlayer()
     var spotifyPlayer = SpotifyPlayer()
     #else
@@ -168,10 +166,6 @@ import MediaRemoteAdapter
     // nil to deal with previously saved songs that don't have lang saved with them
     // or for LRCLIB
     var currentBackground: Color? = nil
-    var edgeVisualizerLevel: Double = 0
-    var edgeVisualizerStatus: String?
-    @ObservationIgnored private let edgeAudioMonitor = EdgeAudioMonitor()
-    @ObservationIgnored private var edgeVisualizerStartTask: Task<Void, Never>?
     
     var animatedDisplay: Bool {
         get {
@@ -279,9 +273,6 @@ import MediaRemoteAdapter
         }
     }
 
-    // Override menubar with an update message
-    var mustUpdateUrgent: Bool = false
-
     // Delayed variable to hook onto for fullscreen (whether to display lyrics or not)
     // Prevents flickering that occurs when we directly bind to currentlyPlayingLyrics.isEmpty()
     var lyricsIsEmptyPostLoad: Bool = true
@@ -370,18 +361,8 @@ import MediaRemoteAdapter
         }
         #if os(macOS)
         migrateTimestampsIfNeeded(context: coreDataContainer.viewContext)
-        
-        
-        // Check if user must urgently update (overrides menubar)
-        Task {
-            mustUpdateUrgent = await updaterService.urgentUpdateExists
-        }
-        
         // onAppear()
         print("on appear running")
-        if userDefaultStorage.latestUpdateWindowShown < 23 {
-            return
-        }
         #endif
         if userDefaultStorage.cookie.count == 0 {
             print("Setting hasOnboarded to false due to empty cookie")
@@ -683,13 +664,6 @@ import MediaRemoteAdapter
         }
     }
     
-    func openTranslationHelpOnFirstRun(_ openURL: OpenURLAction) {
-        if !userDefaultStorage.hasTranslated {
-            openURL(URL(string: "https://aviwadhwa.com/TranslationHelp")!)
-        }
-        userDefaultStorage.hasTranslated = true
-    }
-    
     @MainActor
     func translationTask(_ session: TranslationSession) async {
         isFetchingTranslation = true
@@ -766,14 +740,6 @@ import MediaRemoteAdapter
     }
     
     // Only called when Romanize is true
-//    func romanizeMetadata() {
-//        // Generate romanized metadata from name & artist
-//        if userDefaultStorage.romanizeMetadata, let currentlyPlayingName, let romanizedName = RomanizerService.generateRomanizedString(currentlyPlayingName), let currentlyPlayingArtist, let romanizedArtist = RomanizerService.generateRomanizedString(currentlyPlayingArtist) {
-//            self.currentlyPlayingName = romanizedName
-//            self.currentlyPlayingArtist = romanizedArtist
-//        }
-//    }
-    
     func romanizeName(_ currentlyPlayingName: String) -> String? {
         if let romanizedName = RomanizerService.generateRomanizedString(currentlyPlayingName) {
             return romanizedName
@@ -1376,7 +1342,6 @@ import MediaRemoteAdapter
     
     func onAppear(_ openWindow: OpenWindowAction) {
         setCurrentProperties()
-        syncEdgeVisualizer()
     }
     
     func onCurrentlyPlayingIDChange() async {
@@ -1559,10 +1524,10 @@ import MediaRemoteAdapter
     }
     
     func startLyricUpdater(runSpotifyDriftFix: Bool = true) {
-        spotifySyncLog("startLyricUpdater called isPlaying=\(isPlaying) lyricsCount=\(currentlyPlayingLyrics.count) index=\(currentlyPlayingLyricsIndex.map(String.init) ?? "nil") mustUpdateUrgent=\(mustUpdateUrgent)")
+        spotifySyncLog("startLyricUpdater called isPlaying=\(isPlaying) lyricsCount=\(currentlyPlayingLyrics.count) index=\(currentlyPlayingLyricsIndex.map(String.init) ?? "nil")")
         currentLyricsUpdaterTask?.cancel()
-        if !isPlaying || currentlyPlayingLyrics.isEmpty || mustUpdateUrgent {
-            spotifySyncLog("startLyricUpdater skipped isPlaying=\(isPlaying) lyricsCount=\(currentlyPlayingLyrics.count) mustUpdateUrgent=\(mustUpdateUrgent)")
+        if !isPlaying || currentlyPlayingLyrics.isEmpty {
+            spotifySyncLog("startLyricUpdater skipped isPlaying=\(isPlaying) lyricsCount=\(currentlyPlayingLyrics.count)")
             return
         }
         // If an index exists, we're unpausing: meaning we must instantly find the current lyric
@@ -1687,37 +1652,6 @@ import MediaRemoteAdapter
         currentBackground = intToRGB(colorInt)
     }
 
-    func syncEdgeVisualizer() {
-        edgeAudioMonitor.onLevel = { [weak self] level in
-            Task { @MainActor in
-                self?.edgeVisualizerLevel = level
-            }
-        }
-        edgeAudioMonitor.onStatus = { [weak self] status in
-            Task { @MainActor in
-                self?.edgeVisualizerStatus = status
-            }
-        }
-
-        edgeVisualizerStartTask?.cancel()
-
-        if userDefaultStorage.edgeVisualizerEnabled {
-            edgeVisualizerStartTask = Task { [weak self] in
-                await self?.edgeAudioMonitor.start()
-            }
-        } else {
-            edgeVisualizerStartTask = Task { [weak self] in
-                await self?.edgeAudioMonitor.stop()
-            }
-        }
-    }
-
-    func openScreenRecordingSettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") else {
-            return
-        }
-        NSWorkspace.shared.open(url)
-    }
     #endif
     
     func fetchLyrics(for trackID: String, _ trackName: String, checkCoreDataFirst: Bool) async throws -> [LyricLine] {

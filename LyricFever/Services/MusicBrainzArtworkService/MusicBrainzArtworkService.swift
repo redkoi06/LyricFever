@@ -2,7 +2,6 @@
 //  MusicBrainzArtworkService.swift
 //  Lyric Fever
 //
-//  Created by Avi Wadhwa on 2025-07-26.
 //
 
 
@@ -10,7 +9,6 @@
 //  MusicBrainz.swift
 //  Lyric Fever
 //
-//  Created by Avi Wadhwa on 2025-07-18.
 //
 
 import Foundation

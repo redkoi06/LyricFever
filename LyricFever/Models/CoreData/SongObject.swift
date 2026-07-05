@@ -2,7 +2,6 @@
 //  SongObject+CoreDataClass.swift
 //  SpotifyLyricsInMenubar
 //
-//  Created by Avi Wadhwa on 06/08/23.
 //
 //
 

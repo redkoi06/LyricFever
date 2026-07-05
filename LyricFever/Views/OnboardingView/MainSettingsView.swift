@@ -2,14 +2,12 @@
 //  MainSettingsView.swift
 //  Lyric Fever
 //
-//  Created by Avi Wadhwa on 2025-07-26.
 //
 
 //
 //  MainSettingsView.swift
 //  Lyric Fever
 //
-//  Created by Avi Wadhwa on 2025-07-19.
 //
 
 import SwiftUI

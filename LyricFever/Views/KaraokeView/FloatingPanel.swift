@@ -2,7 +2,6 @@
 //  FloatingPanel.swift
 //  Lyric Fever
 //
-//  Created by Avi Wadhwa on 2024-10-29.
 //
 
 // Taken from the Cindori blog, updated to fit my needs

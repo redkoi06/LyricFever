@@ -2,7 +2,6 @@
 //  SpotifyScripting.swift
 //  SpotifyLyricsInMenubar
 //
-//  Created by Avi Wadhwa on 13/08/23.
 //
 
 import AppKit

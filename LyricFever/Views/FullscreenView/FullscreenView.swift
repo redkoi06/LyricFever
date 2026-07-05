@@ -2,7 +2,6 @@
 //  FullscreenView.swift
 //  Lyric Fever
 //
-//  Created by Avi Wadhwa on 2024-07-27.
 //
 
 import SwiftUI

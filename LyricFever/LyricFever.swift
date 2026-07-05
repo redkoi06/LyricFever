@@ -2,7 +2,6 @@
 //  SpotifyLyricsInMenubarApp.swift
 //  SpotifyLyricsInMenubar
 //
-//  Created by Avi Wadhwa on 26/07/23.
 //
 
 import SwiftUI
@@ -19,18 +18,12 @@ extension NSScreen {
     }
 }
 
-enum MusicType {
-    case spotify
-    case appleMusic
-}
-
 @main
 struct LyricFever: App {
     @State var viewmodel = ViewModel.shared
     @State private var isMenubarPresented = false
     @State private var menubarStatusItemController = MenubarStatusItemController()
     @Environment(\.openWindow) var openWindow
-    @Environment(\.openURL) var openURL
     
     var body: some Scene {
         MenuBarExtra {
@@ -51,13 +44,6 @@ struct LyricFever: App {
                     return
                 }
                 viewmodel.refreshArtworkForCurrentTrack(reason: "currentlyPlaying task")
-            }
-            .task(id: viewmodel.userDefaultStorage.latestUpdateWindowShown) {
-                if viewmodel.userDefaultStorage.latestUpdateWindowShown < 33 {
-                    NSApplication.shared.activate(ignoringOtherApps: true)
-                    openWindow(id: "update")
-                    viewmodel.userDefaultStorage.latestUpdateWindowShown = 33
-                }
             }
             .task(id: viewmodel.userDefaultStorage.hasOnboarded) {
                 if !viewmodel.userDefaultStorage.hasOnboarded {
@@ -84,10 +70,6 @@ struct LyricFever: App {
                     .animation(.easeIn(duration: 0.2))
                     .environment(viewmodel)
             }
-            .edgeVisualizerPanel(isPresented: Binding(
-                get: { viewmodel.userDefaultStorage.edgeVisualizerEnabled },
-                set: { viewmodel.userDefaultStorage.edgeVisualizerEnabled = $0 }
-            ))
             .onAppear {
                 viewmodel.onAppear(openWindow)
             }
@@ -118,11 +100,6 @@ struct LyricFever: App {
             .onChange(of: viewmodel.userDefaultStorage.romanize) {
                 viewmodel.romanizeDidChange()
             }
-//            .onChange(of: viewmodel.userDefaultStorage.romanizeMetadata) {
-//                if viewmodel.userDefaultStorage.romanizeMetadata {
-//                    viewmodel.romanizeMetadata()
-//                }
-//            }
             .onChange(of: viewmodel.userDefaultStorage.translate) {
                 if !viewmodel.reloadTranslationConfigIfTranslating() {
                     viewmodel.translatedLyric = []
@@ -144,12 +121,6 @@ struct LyricFever: App {
                 } else {
                     viewmodel.stopLyricUpdater()
                 }
-            }
-            .onChange(of: viewmodel.userDefaultStorage.translate) {
-                viewmodel.openTranslationHelpOnFirstRun(openURL)
-            }
-            .onChange(of: viewmodel.userDefaultStorage.edgeVisualizerEnabled) {
-                viewmodel.syncEdgeVisualizer()
             }
             .onChange(of: viewmodel.userDefaultStorage.cookie) {
                 viewmodel.spotifyLyricProvider.accessToken = nil
@@ -238,22 +209,6 @@ struct LyricFever: App {
                 }
         }
         .windowResizability(.contentSize)
-        Window("Lyric Fever: Update 2.3", id: "update") { // << here !!
-            UpdateWindow().frame(minWidth: 700, maxWidth: 700, alignment: .center)
-                .environment(viewmodel)
-                .preferredColorScheme(.dark)
-                .onAppear {
-                    NSApp.setActivationPolicy(.regular)
-                }
-                .onDisappear {
-                    if !viewmodel.fullscreen {
-                        NSApp.setActivationPolicy(.accessory)
-                    }
-                }
-        }
-            .windowResizability(.contentSize)
-            .windowStyle(.hiddenTitleBar)
-            .windowLevel(.floating)
     }
 }
 

@@ -2,7 +2,6 @@
 //  UserDefaultStorage.swift
 //  Lyric Fever
 //
-//  Created by Avi Wadhwa on 2025-07-17.
 //
 
 import Combine
@@ -29,8 +28,6 @@ class UserDefaultStorage {
     @ObservationIgnored var animateOnStartupFullscreen: Bool
     @ObservableUserDefault(.init(key: "romanize", defaultValue: false, store: .standard))
     @ObservationIgnored var romanize: Bool
-    @ObservableUserDefault(.init(key: "romanizeMetadata", defaultValue: true, store: .standard))
-    @ObservationIgnored var romanizeMetadata: Bool
     @ObservableUserDefault(.init(key: "chinesePreference", defaultValue: 0, store: .standard))
     @ObservationIgnored var chinesePreference: Int
     #if os(macOS)
@@ -54,8 +51,6 @@ class UserDefaultStorage {
     // User setting: hide karaoke on hover
     @ObservableUserDefault(.init(key: "karaokeModeHoveringSetting", defaultValue: false, store: .standard))
     @ObservationIgnored var karaokeModeHoveringSetting: Bool
-    @ObservableUserDefault(.init(key: "edgeVisualizerEnabled", defaultValue: false, store: .standard))
-    @ObservationIgnored var edgeVisualizerEnabled: Bool
     #endif
 
 //    @DefaultsKey(userDefaultsKey: "spDcCookie")
@@ -66,8 +61,6 @@ class UserDefaultStorage {
     // False: Spotify, True: Apple Music
     @ObservableUserDefault(.init(key: "spotifyOrAppleMusic", defaultValue: false, store: .standard))
     @ObservationIgnored var spotifyOrAppleMusic: Bool
-    @ObservableUserDefault(.init(key: "latestUpdateWindowShown", defaultValue: 0, store: .standard))
-    @ObservationIgnored var latestUpdateWindowShown: Int
     #endif
     @ObservableUserDefault(.init(key: "hasOnboarded", defaultValue: false, store: .standard))
     @ObservationIgnored var hasOnboarded: Bool

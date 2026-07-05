@@ -13,10 +13,9 @@
 - Bundle ID：`com.aviwadhwa.SpotifyLyricsInMenubar`
 - 应用版本：`3.3`
 - 当前构建架构：Apple Silicon `arm64`
-- 原始上游仓库：`https://github.com/aviwad/LyricFever.git`
 - 用户自己的仓库：`git@github.com:redkoi06/Lyric.git`
 
-本地 `origin` 仍指向原作者仓库。不要擅自修改 Git remote、全局或本地 `user.name` / `user.email`。向用户仓库推送时使用完整 SSH 地址：
+不要擅自修改 Git remote、全局或本地 `user.name` / `user.email`。向用户仓库推送时使用完整 SSH 地址：
 
 ```bash
 git push git@github.com:redkoi06/Lyric.git main:main
@@ -224,7 +223,7 @@ xcodebuild -quiet \
 
 ## 本机签名
 
-本机没有原作者 Developer ID，因此维护版使用 ad-hoc 签名。不要声称它已 notarized。
+本机没有 Developer ID 证书，因此维护版使用 ad-hoc 签名。不要声称它已 notarized。
 
 ```bash
 cd /Users/lin/Project/LyricFever
