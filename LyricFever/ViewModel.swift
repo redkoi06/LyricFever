@@ -248,6 +248,7 @@ import MediaRemoteAdapter
     private var currentChineseConversionTask: Task<Void, Never>?
     private var fetchRevision: UInt = 0
     private var translationRevision: UInt = 0
+    private var romanizationRevision: UInt = 0
     private var spotifyEmptyLyricsRetryCount = 0
     private var lastAppleMusicWatchdogTrackID: String?
     private var lastAppleMusicWatchdogPosition: TimeInterval?
@@ -645,6 +646,12 @@ import MediaRemoteAdapter
     }
     
     func romanizeDidChange() {
+        let shouldGenerateAnnotations = userDefaultStorage.romanize
+            || userDefaultStorage.karaokeShowRomanization
+        guard shouldGenerateAnnotations else {
+            resetRomanization()
+            return
+        }
         if romanizedLyrics.count != currentlyPlayingLyrics.count {
             regenerateRomanizedLyrics()
         }
@@ -658,6 +665,7 @@ import MediaRemoteAdapter
     }
 
     private func resetRomanization() {
+        romanizationRevision &+= 1
         currentRomanizationTask?.cancel()
         currentRomanizationTask = nil
         romanizedLyrics = []
@@ -671,6 +679,8 @@ import MediaRemoteAdapter
 
     private func regenerateRomanizedLyrics() {
         currentRomanizationTask?.cancel()
+        romanizationRevision &+= 1
+        let revision = romanizationRevision
 
         let trackID = currentlyPlaying
         let lyricsSnapshot = currentlyPlayingLyrics
@@ -689,6 +699,7 @@ import MediaRemoteAdapter
             }.value
 
             guard !Task.isCancelled,
+                  self.romanizationRevision == revision,
                   self.currentlyPlaying == trackID,
                   self.currentlyPlayingLyrics == lyricsSnapshot,
                   generated.count == lyricsSnapshot.count else {
@@ -1828,6 +1839,7 @@ import MediaRemoteAdapter
         setBackgroundColor()
         fetchTranslationSourceLanguage()
         let _ = reloadTranslationConfigIfTranslating()
+        romanizeDidChange()
         chinesePreferenceDidChange()
         lyricsIsEmptyPostLoad = currentlyPlayingLyrics.isEmpty
         spotifySyncLog("setNewLyrics done lyricsCount=\(currentlyPlayingLyrics.count) emptyPostLoad=\(lyricsIsEmptyPostLoad)")

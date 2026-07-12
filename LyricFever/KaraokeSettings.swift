@@ -15,7 +15,6 @@ struct KaraokeSettingsView: View {
     @AppStorage("fixedKaraokeColorHex") var fixedKaraokeColorHex: String = "#2D3CCC"
     @AppStorage("karaokeModeHoveringSetting") var karaokeModeHoveringSetting: Bool = false
     @AppStorage("karaokeShowMultilingual") var karaokeShowMultilingual: Bool = true
-    @AppStorage("karaokeShowRomanization") var karaokeShowRomanization: Bool = false
     @AppStorage("karaokeTransparency") var karaokeTransparency: Double = 50
     private let defaultFixedKaraokeColorHex = "#2D3CCC"
     
@@ -40,8 +39,8 @@ struct KaraokeSettingsView: View {
                 Text("Show multilingual lyrics when translating in Karaoke window")
             }
             .toggleStyle(.checkbox)
-            Toggle(isOn: $karaokeShowRomanization) {
-                Text("在歌词下方显示罗马音")
+            Toggle(isOn: $viewmodel.userDefaultStorage.karaokeShowRomanization) {
+                Text("在歌词下方显示标音")
             }
             .toggleStyle(.checkbox)
             .padding(.bottom, 20)
@@ -82,7 +81,7 @@ struct KaraokeSettingsView: View {
                 karaokeModeHoveringSetting = false
                 karaokeUseAlbumColor = true
                 karaokeShowMultilingual = true
-                karaokeShowRomanization = false
+                viewmodel.userDefaultStorage.karaokeShowRomanization = false
                 karaokeTransparency = 50
                 fixedKaraokeColorHex = defaultFixedKaraokeColorHex
                 viewmodel.karaokeFont = ViewModel.defaultKaraokeFont

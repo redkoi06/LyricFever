@@ -100,6 +100,9 @@ struct LyricFever: App {
             .onChange(of: viewmodel.userDefaultStorage.romanize) {
                 viewmodel.romanizeDidChange()
             }
+            .onChange(of: viewmodel.userDefaultStorage.karaokeShowRomanization) {
+                viewmodel.romanizeDidChange()
+            }
             .onChange(of: viewmodel.userDefaultStorage.translate) {
                 if !viewmodel.reloadTranslationConfigIfTranslating() {
                     viewmodel.translatedLyric = []

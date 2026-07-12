@@ -61,7 +61,7 @@ struct TranslationSettingsView: View {
             }
 
             Section("文字转换") {
-                Toggle("显示罗马音", isOn: $viewmodel.userDefaultStorage.romanize)
+                Toggle("显示标音", isOn: $viewmodel.userDefaultStorage.romanize)
 
                 Picker("中文转换", selection: $viewmodel.userDefaultStorage.chinesePreference) {
                     ForEach(ChineseConversion.allCases) { conversion in
