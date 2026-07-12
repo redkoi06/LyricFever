@@ -1,10 +1,37 @@
-# Lyric Fever 开发上下文
+# Repository Guidelines
 
-最后更新：2026-06-12
+## Project Structure & Module Organization
 
-本文档记录本机维护版 Lyric Fever 的必要背景、已完成修复、开发流程和用户偏好。后续开发应先阅读本文档，避免重复调查或破坏当前可用版本。
+Lyric Fever 是 macOS SwiftUI 应用。Xcode 工程位于 `Lyric Fever.xcodeproj`，共享 scheme 为 `SpotifyLyricsInMenubar`。主要源码在 `LyricFever/`：界面在 `Views/`，播放器适配在 `Players/`，歌词源在 `LyricProvider/`，通用服务在 `Services/`，模型和 CoreData 在 `Models/`。应用元数据、entitlements、辅助代码和资源位于 `LyricFever/Support Files/`；本地化字符串在 `Localizable.xcstrings`。
 
-## 项目与安装位置
+## Build, Test, and Development Commands
+
+- `open "Lyric Fever.xcodeproj"`：用 Xcode 打开项目进行开发。
+- `xcodebuild -project "Lyric Fever.xcodeproj" -scheme SpotifyLyricsInMenubar -configuration Debug -skipPackagePluginValidation -skipMacroValidation build`：在终端编译 Debug 版本。
+- `xcodebuild -quiet -project "Lyric Fever.xcodeproj" -scheme SpotifyLyricsInMenubar -configuration Release -derivedDataPath "$PWD/../DerivedData" -skipPackagePluginValidation -skipMacroValidation CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES ARCHS=arm64 build`：生成本地 Release app。
+- `git diff --check`：提交前检查空白字符问题。
+
+## Coding Style & Naming Conventions
+
+遵循 Swift 5 与现有文件风格：四空格缩进，类型使用 `UpperCamelCase`，属性和函数使用 `lowerCamelCase`，枚举 case 应清晰表达含义。SwiftUI 视图尽量保持小而聚焦，但不要打破现有功能边界。异步逻辑优先使用 Swift Concurrency（`Task`、`async/await`），在回调中修改 UI 状态前必须校验当前曲目，避免旧请求覆盖新歌曲。
+
+## Testing Guidelines
+
+当前仓库没有已提交的 test target 或 `Tests/` 目录。修改歌词解析、歌词源 fallback、CoreData 缓存或播放同步逻辑时，如条件允许应补充聚焦的 XCTest。测试体系建立前，至少运行干净的 `xcodebuild`，并手动验证受影响的 Spotify 与 Apple Music 路径。
+
+## Commit & Pull Request Guidelines
+
+近期提交使用简短祈使句标题，例如 `Fix Apple Music lyric search fallback` 或 `Add Clear Cache`。每个提交应聚焦一个行为变化。PR 需要包含简要说明、手动验证步骤、相关 issue；涉及菜单栏、Karaoke、全屏、引导页或本地化 UI 的改动，应附截图或录屏。
+
+## Security & Local Configuration
+
+不要提交用户密钥、token、cookie、签名身份或机器专属的 DerivedData。不要擅自修改 Git remote 或本地/全局 Git 身份。Spotify 与 Apple Music 相关改动应保持边界清晰，修复一侧时不要破坏另一侧行为。
+
+## Agent-Specific Instructions
+
+以下内容合并自原 `DEVELOPMENT_CONTEXT.md`。后续维护应优先阅读本节，避免重复调查或破坏当前可用版本。
+
+### 项目与安装位置
 
 - 源码目录：`/Users/lin/Project/LyricFever`
 - 当前安装应用：`/Applications/Lyric Fever.app`
@@ -31,7 +58,7 @@ GIT_COMMITTER_EMAIL='redkoi06@users.noreply.github.com' \
 git commit -m 'Commit message'
 ```
 
-## 用户开发偏好
+### 用户开发偏好
 
 - 始终使用简体中文沟通。
 - 优先做小而稳的修复，不重构整个项目，不新增复杂依赖。
@@ -43,9 +70,7 @@ git commit -m 'Commit message'
 - CoreData 已用于离线歌词缓存，歌词问题应优先修复现有缓存和状态恢复路径，不重复实现缓存。
 - Apple Music 与 Spotify 逻辑应明确隔离，修 Spotify 时不要破坏 Apple Music。
 
-## 已完成修复
-
-### Spotify 切歌后歌词不显示
+### 已完成修复：Spotify 切歌后歌词不显示
 
 提交：`38226b0 Fix Spotify lyric sync recovery`
 
@@ -66,7 +91,7 @@ git commit -m 'Commit message'
 [LyricFever][SpotifySync]
 ```
 
-### 专辑封面偶发不显示
+### 已完成修复：专辑封面偶发不显示
 
 提交：`3278ebc Fix album artwork refresh`
 
@@ -81,7 +106,7 @@ git commit -m 'Commit message'
 [LyricFever][Artwork]
 ```
 
-### 刷新歌词导致闪退
+### 已完成修复：刷新歌词导致闪退
 
 提交：`e6fbcc2 Harden lyric state updates against crashes`
 
@@ -112,7 +137,7 @@ refreshLyrics
 ~/Library/Logs/DiagnosticReports/Retired/Lyric Fever-2026-06-10-233436.ips
 ```
 
-### 罗马音注音与全屏切歌定位
+### 已完成修复：罗马音注音与全屏切歌定位
 
 主要修改位于：
 
@@ -140,14 +165,14 @@ LyricFever/Views/KaraokeView/KaraokeView.swift
 - 搜索窗口会被 SwiftUI 复用，切歌时不能只清空结果；必须同步当前曲目信息并重新搜索。带括号副标题的歌曲名应同时尝试去括号后的主标题。
 - Apple Music 的当前时间应贴近 Music.app 官方歌词时间轴，不要套用 Spotify/动画的默认提前补偿；需要微调时使用每首歌手动 offset 或 AirPlay offset。
 
-## 已知行为与暂未修改项
+### 已知行为与暂未修改项
 
 - 菜单窗口中的“大小”滑块并不是 Karaoke/歌词弹幕字体大小。
 - 它当前绑定 `UserDefaultStorage.truncationLength`，控制菜单栏歌词或歌名的截断长度，取值为 30、40、50、60。
 - 用户已明确表示暂时不修改这一行为。
 - Karaoke 字体大小实际来自 `ViewModel.karaokeFont.pointSize`，可在 Karaoke 设置中的字体选择器调整。
 
-## 数据流概览
+### 数据流概览
 
 Spotify：
 
@@ -187,7 +212,7 @@ chineseConversionLyrics
 
 替换歌词时必须先停止 updater 并重置整组状态。任何 UI 下标访问都应校验数组边界。
 
-## Release 构建
+### Release 构建
 
 Xcode 首次构建可能需要下载或重编 Swift Package，耗时数分钟。Metal Toolchain 缺失时可执行：
 
@@ -221,7 +246,7 @@ xcodebuild -quiet \
 
 项目当前存在一些原有 Swift 6 concurrency 和 deprecated API warning。只要 `xcodebuild` 退出码为 0，可视为构建成功；新增修改不应引入新的 error。
 
-## 本机签名
+### 本机签名
 
 本机没有 Developer ID 证书，因此维护版使用 ad-hoc 签名。不要声称它已 notarized。
 
@@ -244,7 +269,7 @@ rm -f "$entitlements"
 
 由于签名身份与官方版不同，macOS 可能要求重新授予 Spotify/Apple Music 自动化权限。
 
-## 安全替换应用
+### 安全替换应用
 
 不要保留长期 App 备份副本，否则 macOS 存储管理会将其识别为重复应用。使用临时 staging 路径验证后原位替换：
 
@@ -274,7 +299,7 @@ open "/Applications/Lyric Fever.app"
 pgrep -fl '/Applications/Lyric Fever.app/Contents/MacOS/Lyric Fever|SpotifyLyricsInMenubar|Lyric Fever'
 ```
 
-## 清理构建缓存
+### 清理构建缓存
 
 确认正式 App 已替换、签名通过并成功启动后，删除构建缓存，避免约 2 GB 空间占用和系统显示重复 App：
 
@@ -294,7 +319,7 @@ mdfind 'kMDItemContentType == "com.apple.application-bundle" && (kMDItemFSName =
 /Applications/Lyric Fever.app
 ```
 
-## 手动验证清单
+### 手动验证清单
 
 每次涉及播放、歌词或异步状态的修改，至少验证：
 
@@ -318,7 +343,7 @@ find "$HOME/Library/Logs/DiagnosticReports" \
   -print
 ```
 
-## 开发完成标准
+### 开发完成标准
 
 一次修改只有满足以下条件才算完成：
 
