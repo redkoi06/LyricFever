@@ -38,7 +38,7 @@ enum TranslationService {
             recognizer.processString(lyric.sourceText)
             if let dominantLanguage = recognizer.dominantLanguage {
                 let value: Locale.Language = .init(identifier: dominantLanguage.rawValue)
-                if value != Locale.Language.systemLanguages.first! {
+                if Locale.Language.systemLanguages.first.map({ value != $0 }) ?? true {
                     langCount[value, default: 0] += 1
                 }
             }

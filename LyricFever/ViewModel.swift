@@ -47,7 +47,9 @@ import MediaRemoteAdapter
     }
     private func initAppleMusicWorkaround() {
         musicController.onTrackInfoReceived = { (data: TrackInfo?) in
+            #if DEBUG
             print("Track info received application=\(data?.payload.applicationName ?? "nil") hasArtwork=\(data?.payload.artwork != nil)")
+            #endif
             Task { @MainActor in
 //                if self.appleMusicUniqueIdentifier == data.payload.uniqueIdentifier {
 //                    print("Apple Music Artwork Workaround: Ignoring artwork for existing song")
@@ -350,21 +352,26 @@ import MediaRemoteAdapter
         
         // Load our CoreData container for Lyrics
         coreDataContainer = NSPersistentContainer(name: "Lyrics")
+        coreDataContainer.viewContext.mergePolicy = NSMergePolicy.overwrite
         
         initAppleMusicWorkaround()
         #if os(macOS)
         observeAppleMusicLifecycle()
         #endif
         
-        coreDataContainer.loadPersistentStores { description, error in
-            if let error = error {
-                print("[LyricFever][CoreData] persistent store failed to load: \(error.localizedDescription)")
-                return
+        coreDataContainer.loadPersistentStores { [weak self] _, error in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let error {
+                    print("[LyricFever][CoreData] persistent store failed to load: \(error.localizedDescription)")
+                    return
+                }
+                #if os(macOS)
+                self.migrateTimestampsIfNeeded(context: self.coreDataContainer.viewContext)
+                #endif
             }
-            self.coreDataContainer.viewContext.mergePolicy = NSMergePolicy.overwrite
         }
         #if os(macOS)
-        migrateTimestampsIfNeeded(context: coreDataContainer.viewContext)
         // onAppear()
         print("on appear running")
         #endif
@@ -524,12 +531,10 @@ import MediaRemoteAdapter
         if currentPlayer == .appleMusic {
             if let currentlyPlaying, let backgroundColor = artworkImage?.findWhiteTextLegibleMostSaturatedDominantColor() {
                 ColorDataService.saveColorToCoreData(trackID: currentlyPlaying, songColor: backgroundColor)
-                print("ViewModel Refresh Lyrics: New color \(backgroundColor) saved for track \(currentlyPlaying)")
             }
         } else {
             if let currentlyPlaying, let backgroundColor = colorData {
                 ColorDataService.saveColorToCoreData(trackID: currentlyPlaying, songColor: backgroundColor)
-                print("ViewModel Refresh Lyrics: New color \(backgroundColor) saved for track \(currentlyPlaying)")
             }
         }
     }
@@ -1055,10 +1060,10 @@ import MediaRemoteAdapter
             let previousDescription = lastAppleMusicWatchdogPosition.map { String($0) } ?? "nil"
             let positionDescription = position.map { String($0) } ?? "nil"
             let indexDescription = currentlyPlayingLyricsIndex.map { String($0) } ?? "nil"
-            print("[LyricFever][AppleMusicSync] position reset detected "
-                  + "previous=\(previousDescription) "
-                  + "current=\(positionDescription) "
-                  + "index=\(indexDescription)")
+            appleMusicSyncLog("position reset detected "
+                + "previous=\(previousDescription) "
+                + "current=\(positionDescription) "
+                + "index=\(indexDescription)")
             resyncAppleMusicLyricsFromPlaybackPosition()
         }
 
@@ -1379,7 +1384,6 @@ import MediaRemoteAdapter
                         self.duration = duration
                         self.currentAlbumName = currentAlbumName
                     }
-                    print("ON APPEAR HAS UPDATED APPLE MUSIC SONG ID")
                     currentlyPlayingAppleMusicPersistentID = appleMusicPlayer.persistentID
                 }
             case .spotify:
@@ -1391,7 +1395,6 @@ import MediaRemoteAdapter
                     self.currentAlbumName = currentAlbumName
                     refreshManualLyricsOffsetForCurrentTrack()
                     self.currentTime = CurrentTimeWithStoredDate(currentTime: 0)
-                    print(currentTrack)
                 }
         }
     }
@@ -1509,21 +1512,17 @@ import MediaRemoteAdapter
                 Task {
                     try await spotifyPlayer.fixSpotifyLyricDrift()
                 }
-                Task {
-                    try await currentLyricsDriftFix?.value
-                }
             }
             #endif
         }
         currentLyricsUpdaterTask = Task {
             do {
                 try await lyricUpdater()
+            } catch is CancellationError {
+                return
             } catch {
-                print("lyrics were canceled \(error)")
+                print("Lyric updater failed: \(error)")
             }
-        }
-        Task {
-            try await currentLyricsUpdaterTask?.value
         }
         
     }
@@ -2093,8 +2092,7 @@ extension ViewModel {
             return nil
         }
         guard appleMusicTitlesPlausiblyMatch(sourceTrackName, result.SpotifyName) else {
-            print("[LyricFever][AppleMusicSync] rejected Spotify mismatch "
-                  + "source=\(sourceTrackName) candidate=\(result.SpotifyName)")
+            appleMusicSyncLog("rejected Spotify title mismatch")
             return nil
         }
         return result

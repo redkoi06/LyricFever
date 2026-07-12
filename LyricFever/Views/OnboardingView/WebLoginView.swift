@@ -18,14 +18,11 @@ extension NavigationState: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         self.url = webView.url
         
-        print("url is \(String(describing: self.url))")
-        
         if ((self.url?.absoluteString.starts(with: "https://open.spotify.com")) ?? false) {
             ViewModel.shared.checkIfLoggedIn()
         }
         
         if (self.url?.absoluteString.starts(with: "https://accounts.google.com/") ?? false) {
-            print("google link discovered woah \(self.url?.absoluteString ?? "none" )")
             webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15"
         }
     }

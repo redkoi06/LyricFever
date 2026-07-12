@@ -20,7 +20,6 @@ class LRCLIBLyricProvider: LyricProvider {
 
     func fetchNetworkLyrics(trackName: String, trackID: String, currentlyPlayingArtist: String?, currentAlbumName: String?) async throws -> NetworkFetchReturn {
         guard let currentlyPlayingArtist else {
-            print("artist missing")
             return NetworkFetchReturn(lyrics: [], colorData: nil)
         }
 
@@ -48,7 +47,6 @@ class LRCLIBLyricProvider: LyricProvider {
             print("LRCLIB /api/search fallback found no safe automatic match")
             return NetworkFetchReturn(lyrics: [], colorData: nil)
         }
-        print("LRCLIB /api/search fallback selected \(fallbackResult.songName)")
         return NetworkFetchReturn(lyrics: fallbackResult.lyrics, colorData: nil)
     }
 
@@ -61,7 +59,6 @@ class LRCLIBLyricProvider: LyricProvider {
         ]).url else {
             return NetworkFetchReturn(lyrics: [], colorData: nil)
         }
-        print("LRCLIB /api/get: \(url.absoluteString)")
         let req = URLRequest(url: url)
         let urlResponseAndData = try await LRCLIBUserAgentSession.data(for: req)
         let lrcLyrics = try JSONDecoder().decode(LRCLIBLyrics.self, from: urlResponseAndData.0)
@@ -73,10 +70,8 @@ class LRCLIBLyricProvider: LyricProvider {
         let album = currentAlbumName?.replacingOccurrences(of: "&", with: "")
         let trackName = trackName.replacingOccurrences(of: "&", with: "")
         if let artist = artist, let album = album, let url = URL(string: "https://lrclib.net/api/get?artist_name=\(artist)&track_name=\(trackName)&album_name=\(album)") {
-            print("the lrclib call is \(url.absoluteString)")
             let request = URLRequest(url: url)
             let urlResponseAndData = try await LRCLIBUserAgentSession.data(for: request)
-            print(String(describing: urlResponseAndData.0))
             let lrcLyrics = try JSONDecoder().decode(LRCLIBLyrics.self, from: urlResponseAndData.0)
             return NetworkFetchReturn(lyrics: lrcLyrics.lyrics, colorData: nil)
         }
@@ -91,15 +86,11 @@ class LRCLIBLyricProvider: LyricProvider {
             print("MassSearch: LRCLIB: failed to generate URl")
             return []
         }
-        print("LRCLIB /api/search: \(url.absoluteString)")
         let req = URLRequest(url: url)
-        print("The request is \(req)")
         let urlResponseAndData = try await LRCLIBUserAgentSession.data(for: req)
         let lrcLyrics = try JSONDecoder().decode(PluralLRCLIBLyrics.self, from: urlResponseAndData.0)
-        print("lrc downloaded")
         var results: [SongResult] = []
         for lyric in lrcLyrics.lyrics {
-            print("lrc lyric: \(lyric.name)")
             if !lyric.lyrics.isEmpty {
                 results.append(SongResult(lyricType: "LRCLIB", songName: lyric.trackName, albumName: lyric.albumName, artistName: lyric.artistName, lyrics: lyric.lyrics))
             }

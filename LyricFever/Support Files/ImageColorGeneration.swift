@@ -27,7 +27,6 @@ extension NSImage {
                 let blue = Int(clampedColor.blueComponent * 255)
 
                 let combinedValue = (max(0,red) << 16) | (max(0,green) << 8) | max(0,blue)
-                print("Color Generation: using color \(String(describing: clampedColor.hexString)) generated from color \(String(describing: color.hexString))")
                 return Int32(bitPattern: UInt32(combinedValue))
             }
         }
@@ -99,7 +98,6 @@ extension NSImage {
         // Pack into a single UInt32
         
 //        return (UInt32(red) << 16) | (UInt32(green) << 8) | UInt32(blue)
-        print("Find average color: red is \(red), green is \(green), blue is \(blue)")
         let combinedValue = (red << 16) | (green << 8) | blue
         return Int32(bitPattern: UInt32(combinedValue))
     }
@@ -172,4 +170,3 @@ extension NSColor {
     }
 }
 #endif
-

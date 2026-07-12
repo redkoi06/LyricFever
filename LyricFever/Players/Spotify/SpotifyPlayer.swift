@@ -65,7 +65,9 @@ class SpotifyPlayer: @MainActor Player {
     func fixSpotifyLyricDrift() async throws {
         try await Task.sleep(nanoseconds: 2000000000)
         if isPlaying {
+            #if DEBUG
             print("LYRIC UPDATER'S LYRIC DRIFT FIX CALLED")
+            #endif
             spotifyScript?.play?()
         }
     }

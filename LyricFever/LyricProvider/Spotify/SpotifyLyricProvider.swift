@@ -211,7 +211,6 @@ class SpotifyLyricProvider: LyricProvider {
             var request = URLRequest(url: url)
             request.addValue("WebPlayer", forHTTPHeaderField: "app-platform")
             request.addValue("Bearer \(accessToken.accessToken)", forHTTPHeaderField: "authorization")
-            print("Requesting Spotify lyric data")
             try Task.checkCancellation()
             let urlResponseAndData = try await fakeSpotifyUserAgentSession.data(for: request)
 
@@ -235,7 +234,6 @@ class SpotifyLyricProvider: LyricProvider {
             }
 
             let spotifyParent = try JSONDecoder().decode(SpotifyParent.self, from: urlResponseAndData.0)
-            print("Successfully fetched Spotify lyric data")
             return NetworkFetchReturn(lyrics: spotifyParent.lyrics.lyrics, colorData: Int32(spotifyParent.colors.background))
         }
         throw AccessTokenError.invalidResponse
@@ -289,13 +287,11 @@ class SpotifyLyricProvider: LyricProvider {
     func search(trackName: String, artistName: String) async throws -> [SongResult] {
         let appleMusicHelper = try await searchForTrackForAppleMusic(artist: artistName, track: trackName)
         guard let appleMusicHelper else {
-            print("MassSearch: SpotifyLyricProvider, couldn't fetch ID for the searchTerm \(trackName) \(artistName)")
             return []
         }
         let spotifyID = appleMusicHelper.SpotifyID
         let lyrics = try await fetchNetworkLyrics(trackName: trackName, trackID: spotifyID)
         if lyrics.lyrics == [] {
-            print("MassSearch: SpotifyLyricProvider, empty lyrics")
             return []
         } else {
             let songResult = SongResult(lyricType: "Spotify", songName: appleMusicHelper.SpotifyName, albumName: appleMusicHelper.SpotifyAlbum, artistName: appleMusicHelper.SpotifyArtist, lyrics: lyrics.lyrics)

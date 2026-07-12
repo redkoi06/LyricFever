@@ -96,7 +96,6 @@ class RomanizerService {
     }
 
     static func generateRomanizedLyric(_ lyric: LyricLine) -> String? {
-        print("Generating Romanized String for lyric \(lyric.words)")
         let language = NLLanguageRecognizer.dominantLanguage(for: lyric.words)
         let japaneseTokenizer = language == .japanese ? try? Tokenizer(dictionary: IPADic()) : nil
         return generateRomanizedString(
@@ -107,7 +106,6 @@ class RomanizerService {
     }
     
     static func generateRomanizedString(_ string: String) -> String? {
-        print("Generating Romanized String for string \(string)")
         let language = NLLanguageRecognizer.dominantLanguage(for: string)
         let japaneseTokenizer = language == .japanese ? try? Tokenizer(dictionary: IPADic()) : nil
         return generateRomanizedString(
