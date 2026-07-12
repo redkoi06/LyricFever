@@ -270,11 +270,13 @@ class SpotifyLyricProvider: LyricProvider {
                 }
                 
                 if let trackID, let trackName, let albumName, let artistName {
+                    #if DEBUG
                     print("Apple Music Network Fetch: Internal Search Success")
                     print("Track name: \(trackName)")
                     print("Artist name: \(artistName)")
                     print("Album name: \(albumName)")
                     print("Track ID: \(trackID)")
+                    #endif
                     return AppleMusicHelper(SpotifyID: trackID, SpotifyName: trackName, SpotifyArtist: artistName, SpotifyAlbum: albumName)
                 }
             }

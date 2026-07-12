@@ -13,15 +13,16 @@ import SwiftUI
 
 // MARK: - Constants / font helpers
 
-private let primaryFont     = NSFont.boldSystemFont(ofSize: 40)
-private let romanizationFont = NSFont.systemFont(ofSize: 24, weight: .semibold)
-private let translationFont = NSFont.systemFont(ofSize: 30, weight: .semibold)
+@MainActor private let primaryFont = NSFont.boldSystemFont(ofSize: 40)
+@MainActor private let romanizationFont = NSFont.systemFont(ofSize: 24, weight: .semibold)
+@MainActor private let translationFont = NSFont.systemFont(ofSize: 30, weight: .semibold)
 private let cellPad:     CGFloat = 20
 private let romanizationGap: CGFloat = 4
 private let translationGap: CGFloat = 8
 private let trailInset:  CGFloat = 100
 
 /// Height of a single wrapped text block at a given width.
+@MainActor
 private func textHeight(_ text: String, font: NSFont, width: CGFloat) -> CGFloat {
     guard width > 0 else { return ceil(font.pointSize * 1.4) }
     let attrs: [NSAttributedString.Key: Any] = [.font: font]
@@ -33,6 +34,7 @@ private func textHeight(_ text: String, font: NSFont, width: CGFloat) -> CGFloat
 }
 
 /// Total height for one lyric cell at the given cell width.
+@MainActor
 private func rowHeight(
     primary: String,
     romanization: String?,
@@ -297,6 +299,7 @@ struct LyricsNSScrollView: NSViewRepresentable {
         /// Sync the document view's frame to match the clip view's current width
         /// and the computed content height.  Call this any time lyrics or clip
         /// width may have changed.
+        @MainActor
         func syncDocumentFrame() {
             guard let sv = scrollView, let dv = documentView else { return }
             let clipW = sv.contentView.bounds.width
@@ -310,7 +313,8 @@ struct LyricsNSScrollView: NSViewRepresentable {
             }
         }
 
-        @objc func clipViewResized(_ note: Notification) {
+        @MainActor @objc
+        func clipViewResized(_ note: Notification) {
             syncDocumentFrame()
         }
 

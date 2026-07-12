@@ -7,6 +7,16 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A20000000000000000000011 /* LyricLine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* LyricLine.swift */; };
+		A20000000000000000000012 /* SongResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* SongResult.swift */; };
+		A20000000000000000000013 /* MetadataMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* MetadataMatcher.swift */; };
+		A20000000000000000000014 /* LyricsHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* LyricsHeader.swift */; };
+		A20000000000000000000015 /* ParserExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* ParserExtensions.swift */; };
+		A20000000000000000000016 /* LyricsParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* LyricsParser.swift */; };
+		A20000000000000000000017 /* SongObject.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* SongObject.swift */; };
+		A20000000000000000000018 /* SongObjectExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* SongObjectExtensions.swift */; };
+		A20000000000000000000019 /* LyricsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* LyricsRepository.swift */; };
+		A2000000000000000000001A /* Lyrics.xcdatamodel in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000A /* Lyrics.xcdatamodel */; };
 		8F0D66DC2E99CC5D00976881 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 8F0D66DB2E99CC5D00976881 /* Localizable.xcstrings */; };
 		8F0E98952EE24713008A50A4 /* MenuBarExtraAccess in Frameworks */ = {isa = PBXBuildFile; productRef = 8F0E98942EE24713008A50A4 /* MenuBarExtraAccess */; };
 		8F1198722E72B9840011A962 /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = 8F1198712E72B9840011A962 /* KeyboardShortcuts */; };
@@ -49,6 +59,17 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A20000000000000000000001 /* LyricLine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricFever/Models/LyricLine.swift; sourceTree = SOURCE_ROOT; };
+		A20000000000000000000002 /* SongResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricFever/LyricProvider/SongResult.swift; sourceTree = SOURCE_ROOT; };
+		A20000000000000000000003 /* MetadataMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricFever/Models/MetadataMatcher.swift; sourceTree = SOURCE_ROOT; };
+		A20000000000000000000004 /* LyricsHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricFever/Models/LyricsParser/LyricsHeader.swift; sourceTree = SOURCE_ROOT; };
+		A20000000000000000000005 /* ParserExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricFever/Models/LyricsParser/ParserExtensions.swift; sourceTree = SOURCE_ROOT; };
+		A20000000000000000000006 /* LyricsParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricFever/Models/LyricsParser/LyricsParser.swift; sourceTree = SOURCE_ROOT; };
+		A20000000000000000000007 /* SongObject.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricFever/Models/CoreData/SongObject.swift; sourceTree = SOURCE_ROOT; };
+		A20000000000000000000008 /* SongObjectExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricFever/Models/CoreData/SongObjectExtensions.swift; sourceTree = SOURCE_ROOT; };
+		A20000000000000000000009 /* LyricsRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricFever/Models/CoreData/LyricsRepository.swift; sourceTree = SOURCE_ROOT; };
+		A2000000000000000000000A /* Lyrics.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = LyricFever/Models/CoreData/Lyrics.xcdatamodeld/Lyrics.xcdatamodel; sourceTree = SOURCE_ROOT; };
+		A10000000000000000000001 /* Lyric FeverTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Lyric FeverTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		8F0D66DB2E99CC5D00976881 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		8F1198732E72B9C50011A962 /* GlobalKeyboardShortcutsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalKeyboardShortcutsView.swift; sourceTree = "<group>"; };
 		8F28BFD32D578456002E2CE6 /* KaraokeSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KaraokeSettings.swift; sourceTree = "<group>"; };
@@ -71,6 +92,7 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		A10000000000000000000002 /* LyricFeverTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = LyricFeverTests; sourceTree = "<group>"; };
 		8F4C0B7E2E355C1000D748AA /* Services */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Services; sourceTree = "<group>"; };
 		8F4D20712DFFAEB0004A12CA /* LyricProvider */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = LyricProvider; sourceTree = "<group>"; };
 		8F4D20782E0131A4004A12CA /* Models */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Models; sourceTree = "<group>"; };
@@ -80,6 +102,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		A10000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		8FC8E9422A704EEB00F69915 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -105,6 +134,23 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		A20000000000000000000000 /* Core Test Sources */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000001 /* LyricLine.swift */,
+				A20000000000000000000002 /* SongResult.swift */,
+				A20000000000000000000003 /* MetadataMatcher.swift */,
+				A20000000000000000000004 /* LyricsHeader.swift */,
+				A20000000000000000000005 /* ParserExtensions.swift */,
+				A20000000000000000000006 /* LyricsParser.swift */,
+				A20000000000000000000007 /* SongObject.swift */,
+				A20000000000000000000008 /* SongObjectExtensions.swift */,
+				A20000000000000000000009 /* LyricsRepository.swift */,
+				A2000000000000000000000A /* Lyrics.xcdatamodel */,
+			);
+			name = "Core Test Sources";
+			sourceTree = "<group>";
+		};
 		8FC1F4E42A7969C70043D92A /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
@@ -115,6 +161,8 @@
 		8FC8E93C2A704EEB00F69915 = {
 			isa = PBXGroup;
 			children = (
+				A10000000000000000000002 /* LyricFeverTests */,
+				A20000000000000000000000 /* Core Test Sources */,
 				8FCFD1C22AE35DEA00B22023 /* spotifylogin.gif */,
 				8F0D66DB2E99CC5D00976881 /* Localizable.xcstrings */,
 				8FA436AD2BC49D480072016C /* newPermissionMac.gif */,
@@ -128,6 +176,7 @@
 			isa = PBXGroup;
 			children = (
 				8FC8E9452A704EEB00F69915 /* Lyric Fever.app */,
+				A10000000000000000000001 /* Lyric FeverTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -153,6 +202,26 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		A10000000000000000000006 /* Lyric FeverTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1000000000000000000000B /* Build configuration list for PBXNativeTarget "Lyric FeverTests" */;
+			buildPhases = (
+				A10000000000000000000005 /* Sources */,
+				A10000000000000000000003 /* Frameworks */,
+				A10000000000000000000004 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000002 /* LyricFeverTests */,
+			);
+			name = "Lyric FeverTests";
+			productName = "Lyric FeverTests";
+			productReference = A10000000000000000000001 /* Lyric FeverTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		8FC8E9442A704EEB00F69915 /* Lyric Fever */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 8FC8E9542A704EED00F69915 /* Build configuration list for PBXNativeTarget "Lyric Fever" */;
@@ -206,6 +275,10 @@
 				LastSwiftUpdateCheck = 1500;
 				LastUpgradeCheck = 1610;
 				TargetAttributes = {
+					A10000000000000000000006 = {
+						CreatedOnToolsVersion = 26.0;
+						TestTargetID = 8FC8E9442A704EEB00F69915;
+					};
 					8FC8E9442A704EEB00F69915 = {
 						CreatedOnToolsVersion = 15.0;
 					};
@@ -243,11 +316,19 @@
 			projectRoot = "";
 			targets = (
 				8FC8E9442A704EEB00F69915 /* Lyric Fever */,
+				A10000000000000000000006 /* Lyric FeverTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		A10000000000000000000004 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		8FC8E9432A704EEB00F69915 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -261,6 +342,23 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		A10000000000000000000005 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A2000000000000000000001A /* Lyrics.xcdatamodel in Sources */,
+				A20000000000000000000011 /* LyricLine.swift in Sources */,
+				A20000000000000000000012 /* SongResult.swift in Sources */,
+				A20000000000000000000013 /* MetadataMatcher.swift in Sources */,
+				A20000000000000000000014 /* LyricsHeader.swift in Sources */,
+				A20000000000000000000015 /* ParserExtensions.swift in Sources */,
+				A20000000000000000000016 /* LyricsParser.swift in Sources */,
+				A20000000000000000000017 /* SongObject.swift in Sources */,
+				A20000000000000000000018 /* SongObjectExtensions.swift in Sources */,
+				A20000000000000000000019 /* LyricsRepository.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		8FC8E9412A704EEB00F69915 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -277,6 +375,36 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
+		A10000000000000000000009 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 38TP6LZLJ5;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.aviwadhwa.SpotifyLyricsInMenubarTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A1000000000000000000000A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 38TP6LZLJ5;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.aviwadhwa.SpotifyLyricsInMenubarTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 		8FC8E9522A704EED00F69915 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -482,6 +610,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A1000000000000000000000B /* Build configuration list for PBXNativeTarget "Lyric FeverTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10000000000000000000009 /* Debug */,
+				A1000000000000000000000A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		8FC8E9402A704EEB00F69915 /* Build configuration list for PBXProject "Lyric Fever" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

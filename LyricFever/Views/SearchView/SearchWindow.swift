@@ -8,32 +8,34 @@ import SwiftUI
 
 struct SearchWindow: View {
     @Environment(ViewModel.self) var viewmodel
-    @State var trackName: String = ""
-    @State var currentProvider: String = ""
-    @State var artistName: String = ""
+    @State private var trackName: String = ""
+    @State private var currentProvider: String = ""
+    @State private var artistName: String = ""
     @State private var searchResults: [SongResult] = []
-    @State var isFetching = false
+    @State private var isFetching = false
     @State private var selectedLyric: UUID? = nil
     @State private var lyricsAreApplied: Bool = false
     @State private var searchTask: Task<Void, Never>? = nil
+    @State private var searchRevision: UInt = 0
+    @State private var searchMessage: String? = nil
     
     private let overlayHeight: CGFloat = 250
     
     @ViewBuilder
     var searchControlsView: some View {
-        HStack {
-            Text("Song Name")
-            TextField("", text: $trackName)
-                .padding(.trailing, 30)
-            Text("Artist Name:")
-            TextField("", text: $artistName)
-                .padding(.trailing, 30)
+        HStack(spacing: 12) {
+            TextField("Song Name", text: $trackName)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Song Name")
+            TextField("Artist Name", text: $artistName)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Artist Name")
             Button {
                 startSearchTask()
             } label: {
-                Image(systemName: "magnifyingglass")
+                Label("Search", systemImage: "magnifyingglass")
             }
-            .disabled(isFetching)
+            .disabled(isFetching || trackName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             .keyboardShortcut(.defaultAction)
             .tint(.primary)
         }
@@ -63,9 +65,7 @@ struct SearchWindow: View {
                     guard let spotifyID = viewmodel.currentlyPlaying else {
                         return
                     }
-                    // thats how i save to coredata
-                    let _ = SongObject(from: cleanLyrics, with: viewmodel.coreDataContainer.viewContext, trackID: spotifyID, trackName: trackName)
-                    viewmodel.saveCoreData()
+                    viewmodel.saveLyricsToCache(cleanLyrics, trackID: spotifyID, trackName: trackName)
                     lyricsAreApplied = true
                 } label: {
                     Label(lyricsAreApplied ? "Lyrics were applied!" : "Click to Use", systemImage: "checkmark")
@@ -87,15 +87,6 @@ struct SearchWindow: View {
         }
     }
     
-    // Helper to format milliseconds as mm:ss
-    private func formattedTimestamp(ms: TimeInterval) -> String {
-        let totalSeconds = Int(ms) / 1000
-        let formatter = DateComponentsFormatter()
-        formatter.allowedUnits = [.minute, .second]
-        formatter.zeroFormattingBehavior = [.pad]
-        return formatter.string(from: TimeInterval(totalSeconds)) ?? "00:00"
-    }
-    
     @ViewBuilder
     var searchWindow: some View {
         VStack {
@@ -113,46 +104,115 @@ struct SearchWindow: View {
     @ViewBuilder
     var loadingView: some View {
         if isFetching {
-            Rectangle()
-                .fill(Color.black.opacity(0.5))
-                .frame(width: 80, height: 80)
-                .cornerRadius(10)
-            ProgressView()
+            VStack(spacing: 10) {
+                ProgressView()
+                Text(currentProvider.isEmpty ? "Searching…" : "Searching \(currentProvider)…")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(20)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        } else if searchResults.isEmpty, let searchMessage {
+            VStack(spacing: 8) {
+                Image(systemName: "text.magnifyingglass")
+                    .font(.title)
+                    .foregroundStyle(.secondary)
+                Text(searchMessage)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+            }
+            .padding()
         }
     }
     
-    func searchLyrics() async throws {
-        selectedLyric = nil
-        isFetching = true
-        defer { isFetching = false }
-        searchResults = []
-        let trackNameCandidates = titleSearchCandidates(for: trackName)
+    private func searchLyrics(
+        trackName: String,
+        artistName: String,
+        revision: UInt
+    ) async throws -> [SongResult] {
+        var allResults: [SongResult] = []
+        var lastError: Error?
+        var completedRequestCount = 0
+        let trackNameCandidates = MetadataMatcher.titleCandidates(for: trackName)
+
         for lyricProvider in viewmodel.allNetworkLyricProvidersForSearch {
-            if Task.isCancelled { return }
+            try Task.checkCancellation()
+            guard searchRevision == revision else { throw CancellationError() }
             currentProvider = lyricProvider.providerName
-            var providerResults: [SongResult] = []
+
             for candidateTrackName in trackNameCandidates {
-                if Task.isCancelled { return }
-                let results = try await lyricProvider.search(trackName: candidateTrackName, artistName: artistName)
-                if Task.isCancelled { return }
-                providerResults.append(contentsOf: results)
-            }
-            searchResults.append(contentsOf: providerResults.filter(isRelevantSearchResult))
-            searchResults = deduplicatedSearchResults(searchResults).sorted {
-                searchResultRelevance($0) > searchResultRelevance($1)
+                try Task.checkCancellation()
+                do {
+                    let results = try await lyricProvider.search(
+                        trackName: candidateTrackName,
+                        artistName: artistName
+                    )
+                    try Task.checkCancellation()
+                    guard searchRevision == revision else { throw CancellationError() }
+                    completedRequestCount += 1
+                    allResults.append(contentsOf: results)
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    lastError = error
+                }
             }
         }
+
+        if completedRequestCount == 0, let lastError {
+            throw lastError
+        }
+        return MetadataMatcher.filteredAndSorted(
+            allResults,
+            trackName: trackName,
+            artistName: artistName
+        )
     }
 
     private func startSearchTask() {
+        searchTask?.cancel()
+        searchRevision &+= 1
+        let revision = searchRevision
+        let requestedTrackName = trackName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let requestedArtistName = artistName.trimmingCharacters(in: .whitespacesAndNewlines)
+
         selectedLyric = nil
         searchResults = []
-        searchTask?.cancel()
+        searchMessage = nil
+        currentProvider = ""
+        lyricsAreApplied = false
+
+        guard !requestedTrackName.isEmpty else {
+            isFetching = false
+            searchMessage = "Enter a song name to search."
+            return
+        }
+
+        isFetching = true
         searchTask = Task { @MainActor in
+            defer {
+                if searchRevision == revision {
+                    isFetching = false
+                    currentProvider = ""
+                }
+            }
             do {
-                try await searchLyrics()
+                let results = try await searchLyrics(
+                    trackName: requestedTrackName,
+                    artistName: requestedArtistName,
+                    revision: revision
+                )
+                guard searchRevision == revision else { return }
+                searchResults = results
+                if results.isEmpty {
+                    searchMessage = "No matching lyrics found."
+                }
+            } catch is CancellationError {
+                return
             } catch {
                 print("Search Task Error: \(error)")
+                guard searchRevision == revision else { return }
+                searchMessage = "Search failed. Check your network connection and try again."
             }
         }
     }
@@ -165,92 +225,6 @@ struct SearchWindow: View {
         artistName = viewmodel.currentlyPlayingArtist ?? ""
     }
 
-    private func deduplicatedSearchResults(_ results: [SongResult]) -> [SongResult] {
-        var seen: Set<String> = []
-        return results.filter { result in
-            let key = [
-                result.lyricType,
-                normalizedSearchMetadata(result.songName),
-                normalizedSearchMetadata(result.artistName),
-                normalizedSearchMetadata(result.albumName)
-            ].joined(separator: "|")
-            return seen.insert(key).inserted
-        }
-    }
-
-    private func isRelevantSearchResult(_ result: SongResult) -> Bool {
-        !result.lyrics.isEmpty && searchResultRelevance(result) > 0
-    }
-
-    private func searchResultRelevance(_ result: SongResult) -> Int {
-        let resultTitle = normalizedSearchMetadata(result.songName)
-        guard !resultTitle.isEmpty else {
-            return 0
-        }
-
-        let titleScore: Int
-        let queryTitles = titleSearchCandidates(for: trackName)
-            .map(normalizedSearchMetadata)
-            .filter { !$0.isEmpty }
-        guard !queryTitles.isEmpty else {
-            return 0
-        }
-
-        if queryTitles.contains(resultTitle) {
-            titleScore = 100
-        } else {
-            guard queryTitles.contains(where: { queryTitle in
-                let shorterCount = min(queryTitle.count, resultTitle.count)
-                let longerCount = max(queryTitle.count, resultTitle.count)
-                return shorterCount * 10 >= longerCount * 4
-                    && (queryTitle.contains(resultTitle) || resultTitle.contains(queryTitle))
-            }) else {
-                return 0
-            }
-            titleScore = 70
-        }
-
-        let queryArtist = normalizedSearchMetadata(artistName)
-        let resultArtist = normalizedSearchMetadata(result.artistName)
-        guard !queryArtist.isEmpty, !resultArtist.isEmpty else {
-            return titleScore
-        }
-        if queryArtist == resultArtist {
-            return titleScore + 30
-        }
-        if queryArtist.contains(resultArtist) || resultArtist.contains(queryArtist) {
-            return titleScore + 15
-        }
-        return titleScore
-    }
-
-    private func normalizedSearchMetadata(_ value: String) -> String {
-        value
-            .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
-            .unicodeScalars
-            .filter(CharacterSet.alphanumerics.contains)
-            .map(String.init)
-            .joined()
-    }
-
-    private func titleSearchCandidates(for title: String) -> [String] {
-        let stripped = title
-            .replacingOccurrences(
-                of: #"[\s　]*[\(\（\[\【].*?[\)\）\]\】][\s　]*"#,
-                with: " ",
-                options: .regularExpression
-            )
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return [title, stripped]
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .reduce(into: []) { partialResult, candidate in
-                if !partialResult.contains(candidate) {
-                    partialResult.append(candidate)
-                }
-            }
-    }
-    
     var body: some View {
         searchWindow
             .onExitCommand {
@@ -273,11 +247,6 @@ struct SearchWindow: View {
                 if viewmodel.currentlyPlaying == nil {
                     return
                 }
-                // cancel stale search tasks
-                searchTask?.cancel()
-                isFetching = false
-                searchResults = []
-                lyricsAreApplied = false
                 syncTrackFieldsFromViewModel()
                 startSearchTask()
             }
@@ -290,6 +259,11 @@ struct SearchWindow: View {
                 if let newArtist {
                     artistName = newArtist
                 }
+            }
+            .onDisappear {
+                searchTask?.cancel()
+                searchRevision &+= 1
+                isFetching = false
             }
             .tint(viewmodel.currentBackground)
         .navigationTitle("Searching for \(viewmodel.currentlyPlayingName ?? "-") by \(viewmodel.currentlyPlayingArtist ?? "-")")

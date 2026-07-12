@@ -4,7 +4,7 @@
 //
 //
 
-enum ChineseConversion: Int, CaseIterable, Identifiable {
+enum ChineseConversion: Int, CaseIterable, Identifiable, Sendable {
     case none = 0
     case simplified
     case traditionalNeutral

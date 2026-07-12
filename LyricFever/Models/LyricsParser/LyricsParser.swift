@@ -128,45 +128,50 @@ public class LyricsParser {
     
     private func parseLyric(line: String) -> [LyricLine] {
         var cLine = line
-        var items : [LyricLine] = []
+        var timestamps: [TimeInterval] = []
         while(cLine.hasPrefix("[")) {
             guard let closureIndex = cLine.range(of: "]")?.lowerBound else {
                 break
             }
             
             let startIndex = cLine.index(cLine.startIndex, offsetBy: 1)
-            let endIndex = cLine.index(closureIndex, offsetBy: -1)
-            let amidString = String(cLine[startIndex..<endIndex])
-            
-            let amidStrings = amidString.components(separatedBy: ":")
-            var hour:TimeInterval = 0
-            var minute: TimeInterval = 0
-            var second: TimeInterval = 0
-            if amidStrings.count >= 1 {
-                second = TimeInterval(amidStrings[amidStrings.count - 1]) ?? 0
+            let amidString = String(cLine[startIndex..<closureIndex])
+            guard let timestamp = timestampMilliseconds(from: amidString) else {
+                return []
             }
-            if amidStrings.count >= 2 {
-                minute = TimeInterval(amidStrings[amidStrings.count - 2]) ?? 0
-            }
-            if amidStrings.count >= 3 {
-                hour = TimeInterval(amidStrings[amidStrings.count - 3]) ?? 0
-            }
-
-//            items.append(LyricLine(startTime: 1000*(hour * 3600 + minute * 60 + second + header.offset), words: <#T##String#>))
-//            
-//            cLine.removeSubrange(line.startIndex..<cLine.index(closureIndex, offsetBy: 1))
+            timestamps.append(timestamp)
             cLine.removeSubrange(cLine.startIndex..<cLine.index(closureIndex, offsetBy: 1))
-            cLine = cLine.trimmingCharacters(in: .whitespaces)
-                    // Create a LyricLine with the calculated start time and the remaining line as the words
-            let lyricLine = LyricLine(startTime: 1000*(hour * 3600 + minute * 60 + second + header.offset), words: cLine)
-            items.append(lyricLine)
         }
-        
-//        if items.count == 0 {
-//            items.append(LyricsItem(time: 0, text: line))
-//        }
 
-//        items.forEach{ $0.text = cLine }
-        return items
+        let words = cLine.trimmingCharacters(in: .whitespaces)
+        return timestamps.map { timestamp in
+            LyricLine(startTime: max(0, timestamp + header.offset), words: words)
+        }
+    }
+
+    private func timestampMilliseconds(from value: String) -> TimeInterval? {
+        let components = value.components(separatedBy: ":")
+        guard (2...3).contains(components.count),
+              let seconds = TimeInterval(components[components.count - 1]),
+              let minutes = TimeInterval(components[components.count - 2]),
+              seconds.isFinite,
+              minutes.isFinite,
+              seconds >= 0,
+              minutes >= 0 else {
+            return nil
+        }
+
+        let hours: TimeInterval
+        if components.count == 3 {
+            guard let parsedHours = TimeInterval(components[0]),
+                  parsedHours.isFinite,
+                  parsedHours >= 0 else {
+                return nil
+            }
+            hours = parsedHours
+        } else {
+            hours = 0
+        }
+        return (hours * 3600 + minutes * 60 + seconds) * 1000
     }
 }

@@ -226,6 +226,7 @@ import MediaRemoteAdapter
     
     // CoreData container (for saved lyrics)
     let coreDataContainer: NSPersistentContainer
+    @ObservationIgnored lazy var lyricsRepository = LyricsRepository(context: coreDataContainer.viewContext)
     
     // Logging / Analytics
     let amplitude = Amplitude(configuration: .init(apiKey: amplitudeKey))
@@ -241,6 +242,7 @@ import MediaRemoteAdapter
     private var currentSpotifyWatchdogTask: Task<Void, Never>?
     private var currentSpotifyEmptyLyricsRetryTask: Task<Void, Never>?
     private var currentRomanizationTask: Task<Void, Never>?
+    private var currentChineseConversionTask: Task<Void, Never>?
     private var fetchRevision: UInt = 0
     private var translationRevision: UInt = 0
     private var spotifyEmptyLyricsRetryCount = 0
@@ -402,25 +404,32 @@ import MediaRemoteAdapter
         
     }
     
-    @MainActor
-    func fetchAllNetworkLyrics() async -> NetworkFetchReturn {
-        guard let currentlyPlaying, let currentlyPlayingName else {
-            spotifySyncLog("fetchAllNetworkLyrics aborted: missing currentlyPlaying or name")
-            return NetworkFetchReturn(lyrics: [], colorData: nil)
-        }
-        if currentPlayer == .appleMusic {
-            return await fetchSearchBasedNetworkLyrics(trackID: currentlyPlaying, trackName: currentlyPlayingName)
+    private func fetchAllNetworkLyrics(
+        trackID: String,
+        trackName: String,
+        artistName: String?,
+        albumName: String?,
+        player: PlayerType
+    ) async -> NetworkFetchReturn {
+        if player == .appleMusic {
+            return await fetchSearchBasedNetworkLyrics(
+                trackID: trackID,
+                trackName: trackName,
+                artistName: artistName
+            )
         }
         for networkLyricProvider in allNetworkLyricProviders {
             do {
-                spotifySyncLog("fetchAllNetworkLyrics provider=\(networkLyricProvider.providerName) start trackID=\(currentlyPlaying)")
-                let lyrics = try await networkLyricProvider.fetchNetworkLyrics(trackName: currentlyPlayingName, trackID: currentlyPlaying, currentlyPlayingArtist: currentlyPlayingArtist, currentAlbumName: currentAlbumName)
+                spotifySyncLog("fetchAllNetworkLyrics provider=\(networkLyricProvider.providerName) start trackID=\(trackID)")
+                let lyrics = try await networkLyricProvider.fetchNetworkLyrics(
+                    trackName: trackName,
+                    trackID: trackID,
+                    currentlyPlayingArtist: artistName,
+                    currentAlbumName: albumName
+                )
                 if !lyrics.lyrics.isEmpty {
                     amplitude.track(eventType: "\(networkLyricProvider.providerName) Fetch")
                     spotifySyncLog("fetchAllNetworkLyrics provider=\(networkLyricProvider.providerName) success count=\(lyrics.lyrics.count)")
-                    // thats how i save to coredata
-                    let _ = SongObject(from: lyrics.lyrics, with: coreDataContainer.viewContext, trackID: currentlyPlaying, trackName: currentlyPlayingName)
-                    saveCoreData()
                     return lyrics
                 } else if networkLyricProvider is SpotifyLyricProvider {
                     spotifySyncLog("fetchAllNetworkLyrics provider=\(networkLyricProvider.providerName) empty")
@@ -436,14 +445,18 @@ import MediaRemoteAdapter
         return NetworkFetchReturn(lyrics: [], colorData: nil)
     }
 
-    private func fetchSearchBasedNetworkLyrics(trackID: String, trackName: String) async -> NetworkFetchReturn {
-        guard let artistName = currentlyPlayingArtist else {
+    private func fetchSearchBasedNetworkLyrics(
+        trackID: String,
+        trackName: String,
+        artistName: String?
+    ) async -> NetworkFetchReturn {
+        guard let artistName else {
             spotifySyncLog("fetchSearchBasedNetworkLyrics aborted: missing artist")
             return NetworkFetchReturn(lyrics: [], colorData: nil)
         }
 
         var searchResults: [SongResult] = []
-        let trackNameCandidates = titleSearchCandidates(for: trackName)
+        let trackNameCandidates = MetadataMatcher.titleCandidates(for: trackName)
         for lyricProvider in allNetworkLyricProvidersForSearch {
             if Task.isCancelled {
                 return NetworkFetchReturn(lyrics: [], colorData: nil)
@@ -461,14 +474,14 @@ import MediaRemoteAdapter
                     spotifySyncLog("fetchSearchBasedNetworkLyrics provider=\(lyricProvider.providerName) failed error=\(error)")
                 }
             }
-            searchResults.append(contentsOf: providerResults.filter { isRelevantSearchResult($0, trackName: trackName, artistName: artistName) })
-            searchResults = deduplicatedSearchResults(searchResults).sorted {
-                searchResultRelevance($0, trackName: trackName, artistName: artistName) > searchResultRelevance($1, trackName: trackName, artistName: artistName)
-            }
+            searchResults.append(contentsOf: providerResults)
+            searchResults = MetadataMatcher.filteredAndSorted(
+                searchResults,
+                trackName: trackName,
+                artistName: artistName
+            )
             if let bestResult = searchResults.first {
                 spotifySyncLog("fetchSearchBasedNetworkLyrics provider=\(lyricProvider.providerName) success count=\(bestResult.lyrics.count)")
-                let _ = SongObject(from: bestResult.lyrics, with: coreDataContainer.viewContext, trackID: trackID, trackName: trackName)
-                saveCoreData()
                 return NetworkFetchReturn(lyrics: bestResult.lyrics, colorData: nil)
             }
         }
@@ -476,92 +489,6 @@ import MediaRemoteAdapter
         return NetworkFetchReturn(lyrics: [], colorData: nil)
     }
 
-    private func deduplicatedSearchResults(_ results: [SongResult]) -> [SongResult] {
-        var seen: Set<String> = []
-        return results.filter { result in
-            let key = [
-                result.lyricType,
-                normalizedSearchMetadata(result.songName),
-                normalizedSearchMetadata(result.artistName),
-                normalizedSearchMetadata(result.albumName)
-            ].joined(separator: "|")
-            return seen.insert(key).inserted
-        }
-    }
-
-    private func isRelevantSearchResult(_ result: SongResult, trackName: String, artistName: String) -> Bool {
-        !result.lyrics.isEmpty && searchResultRelevance(result, trackName: trackName, artistName: artistName) > 0
-    }
-
-    private func searchResultRelevance(_ result: SongResult, trackName: String, artistName: String) -> Int {
-        let resultTitle = normalizedSearchMetadata(result.songName)
-        guard !resultTitle.isEmpty else {
-            return 0
-        }
-
-        let queryTitles = titleSearchCandidates(for: trackName)
-            .map(normalizedSearchMetadata)
-            .filter { !$0.isEmpty }
-        guard !queryTitles.isEmpty else {
-            return 0
-        }
-
-        let titleScore: Int
-        if queryTitles.contains(resultTitle) {
-            titleScore = 100
-        } else {
-            guard queryTitles.contains(where: { queryTitle in
-                let shorterCount = min(queryTitle.count, resultTitle.count)
-                let longerCount = max(queryTitle.count, resultTitle.count)
-                return shorterCount * 10 >= longerCount * 4
-                    && (queryTitle.contains(resultTitle) || resultTitle.contains(queryTitle))
-            }) else {
-                return 0
-            }
-            titleScore = 70
-        }
-
-        let queryArtist = normalizedSearchMetadata(artistName)
-        let resultArtist = normalizedSearchMetadata(result.artistName)
-        guard !queryArtist.isEmpty, !resultArtist.isEmpty else {
-            return titleScore
-        }
-        if queryArtist == resultArtist {
-            return titleScore + 30
-        }
-        if queryArtist.contains(resultArtist) || resultArtist.contains(queryArtist) {
-            return titleScore + 15
-        }
-        return titleScore
-    }
-
-    private func normalizedSearchMetadata(_ value: String) -> String {
-        value
-            .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
-            .unicodeScalars
-            .filter(CharacterSet.alphanumerics.contains)
-            .map(String.init)
-            .joined()
-    }
-
-    private func titleSearchCandidates(for title: String) -> [String] {
-        let stripped = title
-            .replacingOccurrences(
-                of: #"[\s　]*[\(\（\[\【].*?[\)\）\]\】][\s　]*"#,
-                with: " ",
-                options: .regularExpression
-            )
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return [title, stripped]
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .reduce(into: []) { partialResult, candidate in
-                if !partialResult.contains(candidate) {
-                    partialResult.append(candidate)
-                }
-            }
-    }
-    
     #if os(macOS)
     func refreshLyrics() async throws {
         // todo: romanize
@@ -570,7 +497,8 @@ import MediaRemoteAdapter
             refreshAppleMusicMetadataFromPlayer()
             await appleMusicStarter()
         }
-        guard let currentlyPlaying, let currentlyPlayingName, let currentDuration = currentPlayerInstance.durationAsTimeInterval else {
+        guard let currentlyPlaying, let currentlyPlayingName,
+              currentPlayerInstance.durationAsTimeInterval != nil else {
             return
         }
         print("Calling refresh lyrics")
@@ -729,6 +657,12 @@ import MediaRemoteAdapter
         romanizedLyrics = []
     }
 
+    private func resetChineseConversion() {
+        currentChineseConversionTask?.cancel()
+        currentChineseConversionTask = nil
+        chineseConversionLyrics = []
+    }
+
     private func regenerateRomanizedLyrics() {
         currentRomanizationTask?.cancel()
 
@@ -776,31 +710,32 @@ import MediaRemoteAdapter
     }
     
     func chinesePreferenceDidChange() {
-        if let chinesePreference = ChineseConversion(rawValue: userDefaultStorage.chinesePreference), chinesePreference != .none {
-            print("Generating Chinese conversion for song \(String(describing: currentlyPlaying)) to chinese style \(chinesePreference.description)")
-            //TODO: check if Task was cancelled
-            let chineseConversionLyrics: [String] = currentlyPlayingLyrics.map({
-                switch chinesePreference {
-                    case .none:
-                        return $0.words
-                    case .simplified:
-                        return RomanizerService.generateMainlandTransliteration($0) ?? $0.words
-                    case .traditionalNeutral:
-                        return RomanizerService.generateTraditionalNeutralTransliteration($0) ?? $0.words
-                    case .traditionalTaiwan:
-                        return RomanizerService.generateTaiwanTransliteration($0) ?? $0.words
-                    case .traditionalHK:
-                        return RomanizerService.generateHongKongTransliteration($0) ?? $0.words
-                }
-            })
-            //TODO: check if Task was cancelled
-            if !Task.isCancelled {
-                self.chineseConversionLyrics = chineseConversionLyrics
-                regenerateRomanizedLyrics()
+        currentChineseConversionTask?.cancel()
+        guard let preference = ChineseConversion(rawValue: userDefaultStorage.chinesePreference),
+              preference != .none,
+              !currentlyPlayingLyrics.isEmpty else {
+            resetChineseConversion()
+            return
+        }
+
+        let trackID = currentlyPlaying
+        let lyricsSnapshot = currentlyPlayingLyrics
+        let sourceLyrics = lyricsSnapshot.map(\.words)
+        resetChineseConversion()
+        currentChineseConversionTask = Task {
+            let generated = await Task.detached(priority: .userInitiated) {
+                RomanizerService.generateChineseConversion(sourceLyrics, preference: preference)
+            }.value
+
+            guard !Task.isCancelled,
+                  self.currentlyPlaying == trackID,
+                  self.currentlyPlayingLyrics == lyricsSnapshot,
+                  let generated,
+                  generated.count == lyricsSnapshot.count else {
+                return
             }
-        } else {
-            chineseConversionLyrics = []
-            regenerateRomanizedLyrics()
+            self.chineseConversionLyrics = generated
+            self.currentChineseConversionTask = nil
         }
     }
     
@@ -905,9 +840,21 @@ import MediaRemoteAdapter
         #endif
     }
 
+    private func artworkLog(_ message: @autoclosure () -> String) {
+        #if DEBUG
+        print("[LyricFever][Artwork] \(message())")
+        #endif
+    }
+
+    private func appleMusicSyncLog(_ message: @autoclosure () -> String) {
+        #if DEBUG
+        print("[LyricFever][AppleMusicSync] \(message())")
+        #endif
+    }
+
     func refreshArtworkForCurrentTrack(reason: String) {
         guard let targetTrackID = currentlyPlaying, !targetTrackID.isEmpty else {
-            print("[LyricFever][Artwork] refresh skipped reason=\(reason) trackID=nil")
+            artworkLog("refresh skipped reason=\(reason) trackID=nil")
             artworkImage = nil
             return
         }
@@ -919,7 +866,7 @@ import MediaRemoteAdapter
 
         currentArtworkFetchTask?.cancel()
         currentArtworkFetchTask = Task { @MainActor in
-            print("[LyricFever][Artwork] refresh start reason=\(reason) trackID=\(targetTrackID) name=\(targetName)")
+            self.artworkLog("refresh start reason=\(reason) trackID=\(targetTrackID) name=\(targetName)")
             let retryDelays: [UInt64] = [0, 600_000_000, 1_800_000_000]
 
             for (attempt, delay) in retryDelays.enumerated() {
@@ -930,37 +877,37 @@ import MediaRemoteAdapter
                     return
                 }
                 guard self.currentlyPlaying == targetTrackID, self.currentPlayer == targetPlayer else {
-                    print("[LyricFever][Artwork] stale refresh ignored target=\(targetTrackID) current=\(self.currentlyPlaying ?? "nil")")
+                    self.artworkLog("stale refresh ignored target=\(targetTrackID) current=\(self.currentlyPlaying ?? "nil")")
                     return
                 }
                 if let artworkImage = await self.currentPlayerInstance.artworkImage {
                     guard self.currentlyPlaying == targetTrackID, self.currentPlayer == targetPlayer else {
-                        print("[LyricFever][Artwork] stale player artwork ignored target=\(targetTrackID) current=\(self.currentlyPlaying ?? "nil")")
+                        self.artworkLog("stale player artwork ignored target=\(targetTrackID) current=\(self.currentlyPlaying ?? "nil")")
                         return
                     }
-                    print("[LyricFever][Artwork] player artwork success attempt=\(attempt + 1) trackID=\(targetTrackID)")
+                    self.artworkLog("player artwork success attempt=\(attempt + 1) trackID=\(targetTrackID)")
                     self.artworkImage = artworkImage
                     return
                 }
-                print("[LyricFever][Artwork] player artwork missing attempt=\(attempt + 1) trackID=\(targetTrackID)")
+                self.artworkLog("player artwork missing attempt=\(attempt + 1) trackID=\(targetTrackID)")
             }
 
             guard self.currentlyPlaying == targetTrackID, self.currentPlayer == targetPlayer else {
-                print("[LyricFever][Artwork] stale fallback ignored target=\(targetTrackID) current=\(self.currentlyPlaying ?? "nil")")
+                self.artworkLog("stale fallback ignored target=\(targetTrackID) current=\(self.currentlyPlaying ?? "nil")")
                 return
             }
             if let targetArtist, let targetAlbum,
                let mbid = await MusicBrainzArtworkService.findMbid(albumName: targetAlbum, artistName: targetArtist),
                let artworkImage = await MusicBrainzArtworkService.artworkImage(for: mbid) {
                 guard self.currentlyPlaying == targetTrackID, self.currentPlayer == targetPlayer else {
-                    print("[LyricFever][Artwork] stale MusicBrainz artwork ignored target=\(targetTrackID) current=\(self.currentlyPlaying ?? "nil")")
+                    self.artworkLog("stale MusicBrainz artwork ignored target=\(targetTrackID) current=\(self.currentlyPlaying ?? "nil")")
                     return
                 }
-                print("[LyricFever][Artwork] MusicBrainz artwork success trackID=\(targetTrackID)")
+                self.artworkLog("MusicBrainz artwork success trackID=\(targetTrackID)")
                 self.artworkImage = artworkImage
                 return
             }
-            print("[LyricFever][Artwork] artwork unavailable trackID=\(targetTrackID)")
+            self.artworkLog("artwork unavailable trackID=\(targetTrackID)")
         }
     }
 
@@ -970,7 +917,7 @@ import MediaRemoteAdapter
         currentlyPlayingLyrics = []
         translatedLyric = []
         resetRomanization()
-        chineseConversionLyrics = []
+        resetChineseConversion()
         lyricsIsEmptyPostLoad = false
         isFetching = true
     }
@@ -1182,10 +1129,10 @@ import MediaRemoteAdapter
             self.duration = duration
         }
         if trackChanged {
-            print("[LyricFever][AppleMusicSync] source track changed id=\(trackID) name=\(trackName)")
+            appleMusicSyncLog("source track changed id=\(trackID) name=\(trackName)")
             currentlyPlayingAppleMusicPersistentID = trackID
         } else if metadataChanged {
-            print("[LyricFever][AppleMusicSync] corrected source metadata name=\(trackName)")
+            appleMusicSyncLog("corrected source metadata name=\(trackName)")
         }
         return trackChanged || metadataChanged
     }
@@ -1196,7 +1143,7 @@ import MediaRemoteAdapter
         currentlyPlayingLyrics = []
         translatedLyric = []
         resetRomanization()
-        chineseConversionLyrics = []
+        resetChineseConversion()
         lyricsIsEmptyPostLoad = true
     }
 
@@ -1378,7 +1325,7 @@ import MediaRemoteAdapter
             currentlyPlayingLyrics = []
             translatedLyric = []
             resetRomanization()
-            chineseConversionLyrics = []
+            resetChineseConversion()
         }
 
         guard userDefaultStorage.hasOnboarded, let currentlyPlaying = currentlyPlaying, let currentlyPlayingName = currentlyPlayingName else {
@@ -1596,8 +1543,15 @@ import MediaRemoteAdapter
                 print("core data error \(error)")
                 // Show some error here
             }
-        } else {
-            print("BAD COREDATA CALL!!")
+        }
+    }
+
+    func saveLyricsToCache(_ lyrics: [LyricLine], trackID: String, trackName: String) {
+        do {
+            try lyricsRepository.upsert(lyrics, trackID: trackID, trackName: trackName)
+            spotifySyncLog("lyrics cache upserted trackID=\(trackID) count=\(lyrics.count)")
+        } catch {
+            print("[LyricFever][CoreData] failed to cache lyrics: \(error)")
         }
     }
     
@@ -1673,6 +1627,9 @@ import MediaRemoteAdapter
     
     func fetchLyrics(for trackID: String, _ trackName: String, checkCoreDataFirst: Bool) async throws -> [LyricLine] {
         let initiatingTrackID = trackID
+        let initiatingPlayer = currentPlayer
+        let artistName = currentlyPlayingArtist
+        let albumName = currentAlbumName
         spotifySyncLog("fetchLyrics begin trackID=\(trackID) trackName=\(trackName) checkCoreDataFirst=\(checkCoreDataFirst)")
         
         if checkCoreDataFirst, let lyrics = fetchFromCoreData(for: trackID) {
@@ -1689,7 +1646,13 @@ import MediaRemoteAdapter
             spotifySyncLog("fetchLyrics CoreData miss; fetching remote trackID=\(trackID) trackName=\(trackName)")
             isFetching = true
             
-            var networkLyrics: NetworkFetchReturn = await fetchAllNetworkLyrics()
+            var networkLyrics = await fetchAllNetworkLyrics(
+                trackID: trackID,
+                trackName: trackName,
+                artistName: artistName,
+                albumName: albumName,
+                player: initiatingPlayer
+            )
             
             // verify non-stale trackID
             if initiatingTrackID != self.currentlyPlaying {
@@ -1706,6 +1669,13 @@ import MediaRemoteAdapter
             // verify non-stale trackID
             if initiatingTrackID == self.currentlyPlaying {
                 callColorDataServiceOnLyricColorOrArtwork(colorData: networkLyrics.colorData)
+                if !networkLyrics.lyrics.isEmpty {
+                    saveLyricsToCache(
+                        networkLyrics.lyrics,
+                        trackID: initiatingTrackID,
+                        trackName: trackName
+                    )
+                }
             } else {
                 spotifySyncLog("fetchLyrics skipping color save due to stale track initiated=\(initiatingTrackID) current=\(self.currentlyPlaying ?? "nil")")
                 throw FetchError.staleTrack
@@ -1719,7 +1689,9 @@ import MediaRemoteAdapter
         do {
             let fetchRequest: NSFetchRequest<SongToLocale> = SongToLocale.fetchRequest()
             fetchRequest.predicate = NSPredicate(format: "id == %@", trackID)
-            guard let object = try coreDataContainer.viewContext.fetch(fetchRequest).first else { return print("Translation: No songToLocale object could be deleted, doesn't exist for trackID \(trackID)") }
+            guard let object = try coreDataContainer.viewContext.fetch(fetchRequest).first else {
+                return
+            }
             coreDataContainer.viewContext.delete(object)
             try coreDataContainer.viewContext.save()
         } catch {
@@ -1729,17 +1701,12 @@ import MediaRemoteAdapter
 
     func deleteLyric(trackID: String) {
         do {
-            let fetchRequest: NSFetchRequest<SongObject> = SongObject.fetchRequest()
-            fetchRequest.predicate = NSPredicate(format: "id == %@", trackID)
-            let object = try coreDataContainer.viewContext.fetch(fetchRequest).first
-            object?.lyricsTimestamps.removeAll()
-            object?.lyricsWords.removeAll()
-            try coreDataContainer.viewContext.save()
+            try lyricsRepository.delete(trackID: trackID)
             currentlyPlayingLyricsIndex = nil
             currentlyPlayingLyrics = []
             translatedLyric = []
             resetRomanization()
-            chineseConversionLyrics = []
+            resetChineseConversion()
             lyricsIsEmptyPostLoad = true
         } catch {
             print("Error deleting data: \(error)")
@@ -1758,15 +1725,7 @@ import MediaRemoteAdapter
     @discardableResult
     func clearLyricCache() -> LyricCacheInfo {
         do {
-            let context = coreDataContainer.viewContext
-            let fetchRequest: NSFetchRequest<SongObject> = SongObject.fetchRequest()
-            let objects = try context.fetch(fetchRequest)
-            for object in objects {
-                context.delete(object)
-            }
-            if context.hasChanges {
-                try context.save()
-            }
+            try lyricsRepository.deleteAll()
             return .empty
         } catch {
             print("[LyricFever][CoreData] failed to clear lyric cache: \(error)")
@@ -1775,47 +1734,21 @@ import MediaRemoteAdapter
     }
 
     private func calculateLyricCacheInfo() throws -> LyricCacheInfo {
-        let fetchRequest: NSFetchRequest<SongObject> = SongObject.fetchRequest()
-        let objects = try coreDataContainer.viewContext.fetch(fetchRequest)
-        var byteCount: Int64 = 0
-        var songCount = 0
-        var lineCount = 0
-
-        for object in objects {
-            let words = object.lyricsWords
-            let timestamps = object.lyricsTimestamps
-            guard !words.isEmpty || !timestamps.isEmpty else { continue }
-
-            songCount += 1
-            lineCount += max(words.count, timestamps.count)
-            byteCount += words.reduce(into: Int64(0)) { partialResult, lyric in
-                partialResult += Int64(lyric.lengthOfBytes(using: .utf8))
-            }
-            byteCount += Int64(timestamps.count * MemoryLayout<TimeInterval>.size)
-        }
-
-        return LyricCacheInfo(byteCount: byteCount, songCount: songCount, lineCount: lineCount)
+        let info = try lyricsRepository.cacheInfo()
+        return LyricCacheInfo(
+            byteCount: info.byteCount,
+            songCount: info.songCount,
+            lineCount: info.lineCount
+        )
     }
     
     func fetchFromCoreData(for trackID: String) -> [LyricLine]? {
-        let fetchRequest: NSFetchRequest<SongObject> = SongObject.fetchRequest()
-        fetchRequest.predicate = NSPredicate(format: "id == %@", trackID) // Replace trackID with the desired value
-
         do {
-            let results = try coreDataContainer.viewContext.fetch(fetchRequest)
-            if let songObject = results.first {
-                // Found the SongObject with the matching trackID
-                let lyricsArray = zip(songObject.lyricsTimestamps, songObject.lyricsWords).map { LyricLine(startTime: $0, words: $1) }
-                guard !lyricsArray.isEmpty else {
-                    spotifySyncLog("fetchFromCoreData empty cache treated as miss trackID=\(trackID)")
-                    return nil
-                }
-                spotifySyncLog("fetchFromCoreData hit trackID=\(trackID) count=\(lyricsArray.count)")
-                return lyricsArray
-            } else {
-                // No SongObject found with the given trackID
-                spotifySyncLog("fetchFromCoreData miss trackID=\(trackID)")
+            if let lyrics = try lyricsRepository.lyrics(for: trackID) {
+                spotifySyncLog("fetchFromCoreData hit trackID=\(trackID) count=\(lyrics.count)")
+                return lyrics
             }
+            spotifySyncLog("fetchFromCoreData miss trackID=\(trackID)")
         } catch {
             spotifySyncLog("fetchFromCoreData error trackID=\(trackID) error=\(error)")
         }
@@ -1865,7 +1798,7 @@ import MediaRemoteAdapter
         currentlyPlayingLyricsIndex = nil
         translatedLyric = []
         resetRomanization()
-        chineseConversionLyrics = []
+        resetChineseConversion()
         currentlyPlayingLyrics = newLyrics
         if currentPlayer == .spotify, !newLyrics.isEmpty {
             resetSpotifyEmptyLyricsRetry()
@@ -1893,9 +1826,7 @@ import MediaRemoteAdapter
             setNewLyricsColorTranslationRomanizationAndStartUpdater(with: cleanLyrics)
         }
         
-        // thats how i save to coredata
-        let _ = SongObject(from: cleanLyrics, with: coreDataContainer.viewContext, trackID: currentlyPlaying, trackName: currentlyPlayingName)
-        saveCoreData()
+        saveLyricsToCache(cleanLyrics, trackID: currentlyPlaying, trackName: currentlyPlayingName)
     }
     #endif
     
@@ -1985,7 +1916,7 @@ extension ViewModel {
                       appleMusicPlayer.persistentID == expectedPersistentID else {
                     return
                 }
-                print("Apple Music CoreData Fetch: setting currentlyPlaying to \(coreDataSpotifyID)")
+                appleMusicSyncLog("cache mapping hit spotifyID=\(coreDataSpotifyID)")
                 self.currentlyPlaying = coreDataSpotifyID
                 return
             }
@@ -1995,11 +1926,11 @@ extension ViewModel {
                   appleMusicPlayer.persistentID == expectedPersistentID else {
                 return
             }
-            print("Apple Music CoreData Fetch: using cached fallback id \(cachedFallbackID)")
+            appleMusicSyncLog("using cached fallback id=\(cachedFallbackID)")
             self.currentlyPlaying = cachedFallbackID
             return
         }
-        print("Apple Music Fetch: No CoreData val. Fetching from network")
+        appleMusicSyncLog("cache mapping missed; fetching from network")
         do {
             try await appleMusicNetworkFetch(
                 expectedPersistentID: expectedPersistentID,
@@ -2014,7 +1945,7 @@ extension ViewModel {
                       appleMusicPlayer.persistentID == expectedPersistentID else {
                     return
                 }
-                print("Apple Music Network Fetch failed; using cached fallback id \(cachedFallbackID)")
+                appleMusicSyncLog("network mapping failed; using cached fallback id=\(cachedFallbackID)")
                 self.currentlyPlaying = cachedFallbackID
                 return
             }
@@ -2032,7 +1963,7 @@ extension ViewModel {
         isFetching = true
         defer {
             isFetching = false
-            print("Apple Music Network Fetch: isFetching set to false")
+            appleMusicSyncLog("network fetch ended")
         }
 //        do {
 //            print("Apple Music Network Fetch: 3 second sleep")
@@ -2040,7 +1971,7 @@ extension ViewModel {
 //        } catch {
 //            print("Apple Music Network Fetch cancelled during the 3 seconds of sleep")
 //        }
-        print("Apple Music Network Fetch: isFetching set to true")
+        appleMusicSyncLog("network fetch started")
         // coredata didn't get us anything
 //        try await spotifyLyricProvider.generateAccessToken()
         
@@ -2057,7 +1988,7 @@ extension ViewModel {
         } catch let error as CancellationError {
             throw error
         } catch {
-            print("Apple Music Network Fetch: Spotify mapping failed; falling back to Apple Music alternative id. error=\(error)")
+            appleMusicSyncLog("Spotify mapping failed; trying Apple Music alternative id. error=\(error)")
             spotifyResult = nil
         }
 
@@ -2101,7 +2032,7 @@ extension ViewModel {
             let results = try coreDataContainer.viewContext.fetch(fetchRequest)
             if let persistentIDToSpotify = results.first {
                 // Found the persistentIDToSpotify object with the matching persistentID
-                print("Apple Music CoreData Fetch: Found SpotifyID \(persistentIDToSpotify.spotifyID) for \(persistentIDToSpotify.persistentID)")
+                appleMusicSyncLog("persistent ID mapping found")
                 guard let spotifyID = persistentIDToSpotify.spotifyID else {
                     return nil
                 }
@@ -2109,17 +2040,17 @@ extension ViewModel {
                     return spotifyID
                 }
                 if cachedLyricsExist(for: spotifyID, matchingTitle: sourceTrackName) {
-                    print("Apple Music CoreData Fetch: accepting legacy mapping with cached lyrics for \(persistentID)")
+                    appleMusicSyncLog("accepting legacy mapping with cached lyrics")
                     UserDefaults.standard.set(sourceFingerprint, forKey: fingerprintKey)
                     return spotifyID
                 }
-                print("Apple Music CoreData Fetch: mapping fingerprint missing or stale for \(persistentID)")
+                appleMusicSyncLog("mapping fingerprint missing or stale")
             } else {
                 // No SongObject found with the given trackID
-                print("No spotifyID found with the provided persistentID. \(currentlyPlayingAppleMusicPersistentID)")
+                appleMusicSyncLog("no Spotify ID mapping found")
             }
         } catch {
-            print("Error fetching persistentIDToSpotify:", error)
+            print("Error fetching Apple Music mapping:", error)
         }
         return nil
     }
@@ -2144,7 +2075,7 @@ extension ViewModel {
             }
             return appleMusicTitlesPlausiblyMatch(sourceTrackName, songObject.title)
         } catch {
-            print("Apple Music CoreData Fetch: error checking cached lyrics for \(trackID): \(error)")
+            appleMusicSyncLog("error checking cached lyrics: \(error)")
             return false
         }
     }
@@ -2224,7 +2155,7 @@ extension ViewModel {
             sourceFingerprint,
             forKey: appleMusicMappingFingerprintKey(persistentID: persistentID)
         )
-        print("Apple Music Network Fetch: Saving persistent id \(persistentID) and Spotify ID \(spotifyID)")
+        appleMusicSyncLog("saving persistent ID mapping")
         saveCoreData()
     }
 }

@@ -119,32 +119,8 @@ class LRCLIBLyricProvider: LyricProvider {
     private func bestAutomaticSearchResult(from results: [SongResult], trackName: String, artistName: String) -> SongResult? {
         results.first { result in
             !result.lyrics.isEmpty
-                && metadataMatches(trackName, result.songName)
-                && metadataMatches(artistName, result.artistName)
+                && MetadataMatcher.plausiblyMatches(trackName, result.songName)
+                && MetadataMatcher.plausiblyMatches(artistName, result.artistName)
         }
-    }
-
-    private func metadataMatches(_ source: String, _ candidate: String) -> Bool {
-        let source = normalizedMetadata(source)
-        let candidate = normalizedMetadata(candidate)
-        guard !source.isEmpty, !candidate.isEmpty else {
-            return false
-        }
-        if source == candidate {
-            return true
-        }
-        let shorterCount = min(source.count, candidate.count)
-        let longerCount = max(source.count, candidate.count)
-        return shorterCount * 10 >= longerCount * 6
-            && (source.contains(candidate) || candidate.contains(source))
-    }
-
-    private func normalizedMetadata(_ value: String) -> String {
-        value
-            .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
-            .unicodeScalars
-            .filter(CharacterSet.alphanumerics.contains)
-            .map(String.init)
-            .joined()
     }
 }

@@ -67,7 +67,7 @@ struct LyricFever: App {
             }
             .floatingPanel(isPresented: $viewmodel.displayKaraoke) {
                 KaraokeView()
-                    .animation(.easeIn(duration: 0.2))
+                    .animation(.easeIn(duration: 0.2), value: viewmodel.displayKaraoke)
                     .environment(viewmodel)
             }
             .onAppear {

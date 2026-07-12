@@ -17,7 +17,7 @@ public struct LyricsHeader {
     public var album: String?
     // by
     public var by: String?
-    // offset
+    // offset in milliseconds
     public var offset: TimeInterval = 0
     // re
     public var editor: String?

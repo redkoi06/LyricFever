@@ -249,13 +249,11 @@ struct MenubarWindowView: View {
 //                   print("Translation: ignoring source language change: nil locale identifier")
 //                   return
 //               }
-               print("Translation: Source language changed. Saving new pair (\(trackID),\(localeIdentifier))  to coredata")
                let newSongToLocaleMapping = SongToLocale(context: viewmodel.coreDataContainer.viewContext)
                newSongToLocaleMapping.id = trackID
                newSongToLocaleMapping.locale = localeIdentifier
                do {
                    try viewmodel.coreDataContainer.viewContext.save()
-                   print("Translation: Successfully saved locale \(String(describing: newSongToLocaleMapping.locale)) for trackID \(trackID)")
                } catch {
                    print("Translation: Couldn't save locale mapping to CoreData: \(error)")
                }

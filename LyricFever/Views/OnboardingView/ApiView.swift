@@ -88,8 +88,6 @@ struct ApiView: View {
                     }
                 }
                 Spacer()
-                NavigationLink(destination: FinalTruncationView(), isActive: $isShowingDetailView) {EmptyView()}
-                    .hidden()
                 if errorMessage != nil, !isLoading {
                     Text("WRONG SP DC COOKIE TRY AGAIN ⚠️")
                         .foregroundStyle(.red)
@@ -114,6 +112,9 @@ struct ApiView: View {
         }
         .padding(.horizontal, 20)
         .navigationBarBackButtonHidden(true)
+        .navigationDestination(isPresented: $isShowingDetailView) {
+            FinalTruncationView()
+        }
         .onAppear {
             spDcCookie = viewModel.userDefaultStorage.cookie
         }

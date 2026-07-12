@@ -4,10 +4,11 @@
 //
 //
 
-import Translation
+@preconcurrency import Translation
 import NaturalLanguage
 
-class TranslationService {
+@MainActor
+enum TranslationService {
     static func translationTask(_ session: TranslationSession, request: [TranslationSession.Request]) async -> TranslationResult {
         print("Translation Service: Translation Task Called")
         do {

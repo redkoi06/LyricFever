@@ -11,7 +11,9 @@ class ColorDataService {
         newColorMapping.songColor = songColor
         do {
             try ViewModel.shared.coreDataContainer.viewContext.save()
+            #if DEBUG
             print("ColorDataService: Successfully saved color \(songColor) for trackID \(trackID)")
+            #endif
         } catch {
             print("ColorDataService: Couldn't save color mapping to CoreData: \(error)")
         }

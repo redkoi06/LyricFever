@@ -29,25 +29,7 @@ struct LRCLIBLyrics: Codable {
     }
     
     static func decodeLyrics(input: String) -> [LyricLine] {
-        var lyricsArray: [LyricLine] = []
-        let lines = input.components(separatedBy: "\n")
-        
-        for line in lines {
-            // Use regex to match the timestamp and the lyrics
-            let regex = try! NSRegularExpression(pattern: #"\[(\d{2}:\d{2}(?:\.\d{2,3})?)\]\s*(.*)"#)
-            let matches = regex.matches(in: line, range: NSRange(line.startIndex..<line.endIndex, in: line))
-            
-            for match in matches {
-                if let timestampRange = Range(match.range(at: 1), in: line),
-                   let lyricsRange = Range(match.range(at: 2), in: line) {
-                    let timestamp = String(line[timestampRange])
-                    let lyrics = String(line[lyricsRange])
-                    lyricsArray.append(LyricLine(startTime: timestamp.convertToTimeInterval(), words: lyrics))
-                }
-            }
-        }
-        
-        return lyricsArray
+        LyricsParser(lyrics: input).lyrics
     }
     
     init(from decoder: any Decoder) throws {

@@ -118,42 +118,27 @@ class RomanizerService {
     }
 
 
-    static func generateMainlandTransliteration(_ lyric: LyricLine) -> String? {
+    static func generateChineseConversion(
+        _ lyrics: [String],
+        preference: ChineseConversion
+    ) -> [String]? {
         do {
-            let converter = try ChineseConverter(options: [.simplify])
-            return converter.convert(lyric.words)
+            let converter: ChineseConverter
+            switch preference {
+            case .none:
+                return lyrics
+            case .simplified:
+                converter = try ChineseConverter(options: [.simplify])
+            case .traditionalNeutral:
+                converter = try ChineseConverter(options: [.traditionalize])
+            case .traditionalTaiwan:
+                converter = try ChineseConverter(options: [.traditionalize, .twStandard, .twIdiom])
+            case .traditionalHK:
+                converter = try ChineseConverter(options: [.traditionalize, .hkStandard])
+            }
+            return lyrics.map(converter.convert)
         } catch {
-            print("RomanizerService: MainlandTransliteration error: \(error)")
-            return nil
-        }
-    }
-    
-    static func generateTraditionalNeutralTransliteration(_ lyric: LyricLine) -> String? {
-        do {
-            let converter = try ChineseConverter(options: [.traditionalize])
-            return converter.convert(lyric.words)
-        } catch {
-            print("RomanizerService: MainlandTransliteration error: \(error)")
-            return nil
-        }
-    }
-    
-    static func generateHongKongTransliteration(_ lyric: LyricLine) -> String? {
-        do {
-            let converter = try ChineseConverter(options: [.traditionalize, .hkStandard])
-            return converter.convert(lyric.words)
-        } catch {
-            print("RomanizerService: HongKongTransliteration error: \(error)")
-            return nil
-        }
-    }
-    
-    static func generateTaiwanTransliteration(_ lyric: LyricLine) -> String? {
-        do {
-            let converter = try ChineseConverter(options: [.traditionalize, .twStandard, .twIdiom])
-            return converter.convert(lyric.words)
-        } catch {
-            print("RomanizerService: TaiwanTransliteration error: \(error)")
+            print("RomanizerService: Chinese conversion error: \(error)")
             return nil
         }
     }
