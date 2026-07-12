@@ -6,7 +6,6 @@
 
 import SwiftUI
 import LaunchAtLogin
-import Translation
 
 struct MenubarWindowView: View {
     @Environment(\.openWindow) var openWindow
@@ -14,7 +13,6 @@ struct MenubarWindowView: View {
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
     @State var currentHoveredItem = MenubarButtonHighlight.none
-    @State var supportedLanguages: [Locale.Language] = []
     @State private var showOtherOptionsPopover = false
     @State private var isSettingsButtonHovered = false
 
@@ -214,75 +212,18 @@ struct MenubarWindowView: View {
     }
 
     @ViewBuilder
-    var translationAndRomanizationView: some View {
+    var translationMenuView: some View {
         @Bindable var viewmodel = viewmodel
-        Section("Translation Options") {
-            if viewmodel.userDefaultStorage.translate {
-                Text(!viewmodel.translatedLyric.isEmpty ? "Translated Lyrics 😃" : "No Translation ☹️")
-            }
-            
-            Toggle("Translate To \(viewmodel.userLocaleLanguageString)", isOn: $viewmodel.userDefaultStorage.translate)
+        Toggle("翻译歌词", isOn: $viewmodel.userDefaultStorage.translate)
             .disabled(!viewmodel.userDefaultStorage.hasOnboarded)
-            Divider()
-        }
-        let translationSourceLanguagePickerBinding = Binding<String?> (
-           get: {
-               return viewmodel.translationSourceLanguage?.maximalIdentifier
-           },
-           set: {
-               if let localeIdentifier = $0 {
-                   viewmodel.translationSourceLanguage = Locale.Language(identifier: localeIdentifier)
-               } else {
-                   viewmodel.translationSourceLanguage = nil
-               }
-               guard let trackID = viewmodel.currentlyPlaying else {
-                   print("Translationg: ignoring source language change: nil currentlyPlaying")
-                   return
-               }
-               guard let translationSourceLanguage = viewmodel.translationSourceLanguage else {
-                   print("Translation: source language change: nil source language, deleting existing pair")
-                   viewmodel.deleteSongLocalePairing(trackID: trackID)
-                   return
-               }
-               let localeIdentifier = translationSourceLanguage.maximalIdentifier
-//               guard let localeIdentifier = translationSourceLanguage.maximalIdentifier else {
-//                   print("Translation: ignoring source language change: nil locale identifier")
-//                   return
-//               }
-               let newSongToLocaleMapping = SongToLocale(context: viewmodel.coreDataContainer.viewContext)
-               newSongToLocaleMapping.id = trackID
-               newSongToLocaleMapping.locale = localeIdentifier
-               do {
-                   try viewmodel.coreDataContainer.viewContext.save()
-               } catch {
-                   print("Translation: Couldn't save locale mapping to CoreData: \(error)")
-               }
-           }
-       )
-        Section("Translation Settings for This Song") {
-            Picker("Source Language", selection: translationSourceLanguagePickerBinding) {
-                Text("Auto").tag(nil as String?)
-                ForEach(supportedLanguages, id: \.maximalIdentifier) { language in
-                    Text(Locale.current.localizedString(forIdentifier: language.minimalIdentifier) ?? language.maximalIdentifier).tag(language.maximalIdentifier)
-                }
-            }
-        }
-//        .onChange(of: viewmodel.translationSourceLanguage) {
-//        }
-        Section("Translation Settings for All Songs") {
-            Picker("Target Language", selection: $viewmodel.userDefaultStorage.translationTargetLanguage) {
-                Text("System (\(viewmodel.systemLocaleString))").tag(nil as Locale.Language?)
-                ForEach(supportedLanguages, id: \.maximalIdentifier) { language in
-                    Text(Locale.current.localizedString(forIdentifier: language.minimalIdentifier) ?? language.maximalIdentifier).tag(language)
-                }
-            }
-        }
-        Section("Transliteration Options") {
-            Toggle("Romanize", isOn: $viewmodel.userDefaultStorage.romanize)
-            Picker("Chinese Conversion", selection: $viewmodel.userDefaultStorage.chinesePreference) {
-                ForEach(ChineseConversion.allCases) { conversionCase in
-                    Text(conversionCase.description).tag(conversionCase.rawValue)
-                }
+
+        Section {
+            Button {
+                viewmodel.selectedSettingsTab = .translation
+                openWindow(id: "onboarding")
+                NSApplication.shared.activate(ignoringOtherApps: true)
+            } label: {
+                Label("翻译设置…", systemImage: "gearshape")
             }
         }
     }
@@ -406,7 +347,7 @@ struct MenubarWindowView: View {
                 }
             }
             Menu {
-                translationAndRomanizationView
+                translationMenuView
             } label: {
                
             }
@@ -523,6 +464,7 @@ struct MenubarWindowView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 Button {
+                    viewmodel.selectedSettingsTab = .main
                     openWindow(id: "onboarding")
                     NSApplication.shared.activate(ignoringOtherApps: true)
                     NotificationCenter.default.post(name: Notification.Name("didClickSettings"), object: nil)
@@ -827,14 +769,6 @@ struct MenubarWindowView: View {
         .onAppear {
             if !viewmodel.isStopped {
                 viewmodel.currentVolume = viewmodel.currentPlayerInstance.volume
-            }
-        }
-        .task {
-            let languages = await Task.detached {
-                await LanguageAvailability().supportedLanguages
-            }.value
-            await MainActor.run {
-                supportedLanguages = languages
             }
         }
     }

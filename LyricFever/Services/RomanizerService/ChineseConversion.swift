@@ -18,15 +18,15 @@ enum ChineseConversion: Int, CaseIterable, Identifiable, Sendable {
     var description: String {
         switch self {
             case .none:
-                "None"
+                "不转换"
             case .simplified:
-                "Simplified"
+                "简体中文"
             case .traditionalNeutral:
-                "Traditional (Neutral)"
+                "繁体中文（通用）"
             case .traditionalTaiwan:
-                "Traditional (Taiwan)"
+                "繁体中文（台湾）"
             case .traditionalHK:
-                "Traditional (HK)"
+                "繁体中文（香港）"
         }
     }
 }

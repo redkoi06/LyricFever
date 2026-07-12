@@ -225,6 +225,7 @@ import MediaRemoteAdapter
     var currentManualLyricsOffsetMS = 0
     var isFetchingTranslation = false
     var translationExists: Bool { !translatedLyric.isEmpty}
+    var selectedSettingsTab: SettingsTab = .main
     
     // CoreData container (for saved lyrics)
     let coreDataContainer: NSPersistentContainer
@@ -1695,6 +1696,28 @@ import MediaRemoteAdapter
             try coreDataContainer.viewContext.save()
         } catch {
             print("Error deleting data: \(error)")
+        }
+    }
+
+    func setTranslationSourceLanguage(_ language: Locale.Language?) {
+        translationSourceLanguage = language
+        guard let trackID = currentlyPlaying else { return }
+
+        if language == nil {
+            deleteSongLocalePairing(trackID: trackID)
+            return
+        }
+
+        let request: NSFetchRequest<SongToLocale> = SongToLocale.fetchRequest()
+        request.predicate = NSPredicate(format: "id == %@", trackID)
+        do {
+            let mapping = try coreDataContainer.viewContext.fetch(request).first
+                ?? SongToLocale(context: coreDataContainer.viewContext)
+            mapping.id = trackID
+            mapping.locale = language?.maximalIdentifier
+            try coreDataContainer.viewContext.save()
+        } catch {
+            print("Translation: Couldn't save locale mapping to CoreData: \(error)")
         }
     }
 
