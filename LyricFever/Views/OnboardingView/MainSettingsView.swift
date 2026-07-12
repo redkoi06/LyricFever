@@ -39,7 +39,6 @@ struct MainSettingsView: View {
     @Environment(ViewModel.self) var viewModel
     @State var permissionDenied: Bool = false
     @State var error: MainSettingsError = .openSpotify
-    @AppStorage("spotifyOrAppleMusic") var spotifyOrAppleMusic: Bool = false
     
     @ViewBuilder
     var permissionDeniedView: some View {
@@ -75,7 +74,8 @@ struct MainSettingsView: View {
                 .controlSize(.large)
                 .buttonStyle(.borderedProminent)
         } else {
-            HStack {
+            switch viewModel.currentPlayer {
+            case .spotify:
                 Button("Give Spotify Permissions") {
                     if !viewModel.spotifyPlayer.isRunning {
                         print("Spotify not running")
@@ -88,8 +88,7 @@ struct MainSettingsView: View {
                         error = .authorized
                     }
                 }
-                .disabled(viewModel.currentPlayer == .appleMusic)
-                
+            case .appleMusic:
                 Button("Give Apple Music Permissions") {
                     if !viewModel.appleMusicPlayer.isRunning {
                         error = .openAppleMusic
@@ -101,9 +100,13 @@ struct MainSettingsView: View {
                         error = .authorized
                     }
                 }
-                .disabled(viewModel.currentPlayer == .spotify)
             }
         }
+    }
+
+    private func resetPermissionStatus(for player: PlayerType) {
+        permissionDenied = false
+        error = player == .appleMusic ? .openAppleMusic : .openSpotify
     }
     
     var body: some View {
@@ -119,19 +122,19 @@ struct MainSettingsView: View {
                 }
                 .transition(.fade)
                 
-                Picker("", selection: $spotifyOrAppleMusic) {
+                Picker("", selection: $viewmodel.currentPlayer) {
                     VStack {
                         Image("spotify")
                             .resizable()
                             .frame(width: 70.0, height: 70.0)
                         Text("Spotify")
-                    }.tag(false)
+                    }.tag(PlayerType.spotify)
                     VStack {
                         Image("music")
                             .resizable()
                             .frame(width: 70.0, height: 70.0)
                         Text("Apple Music")
-                    }.tag(true)
+                    }.tag(PlayerType.appleMusic)
                 }
                 .font(.title2)
                 .frame(width: 500)
@@ -146,14 +149,12 @@ struct MainSettingsView: View {
             }
             .animation(.bouncy, value: permissionDenied)
             .animation(.bouncy, value: error)
+            .onAppear {
+                resetPermissionStatus(for: viewModel.currentPlayer)
+            }
             .onChange(of: viewModel.currentPlayer) {
                 print("Updating permission booleans based on media player change")
-                switch viewModel.currentPlayer {
-                case .appleMusic:
-                        error = .openAppleMusic
-                case .spotify:
-                        error = .openSpotify
-                }
+                resetPermissionStatus(for: viewModel.currentPlayer)
             }
         }
     }

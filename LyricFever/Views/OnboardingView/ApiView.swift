@@ -9,8 +9,9 @@ import SDWebImageSwiftUI
 
 struct ApiView: View {
     @Environment(\.dismiss) var dismiss
+    @Environment(ViewModel.self) var viewModel
     @State private var isShowingDetailView = false
-    @AppStorage("spDcCookie") var spDcCookie: String = ""
+    @State private var spDcCookie: String = ""
     @State var isLoading = false
     @State var errorMessage: String?
     @StateObject var navigationState = NavigationState()
@@ -52,7 +53,8 @@ struct ApiView: View {
                             Button("Log Out") {
                                 Task {
                                     loggedIn = false
-                                    ViewModel.shared.userDefaultStorage.cookie = ""
+                                    spDcCookie = ""
+                                    viewModel.userDefaultStorage.cookie = ""
                                     navigationState.webView.load(URLRequest(url: URL(string: "https://www.spotify.com/logout/")!))
                                     try await Task.sleep(nanoseconds: 2000000000)
                                     navigationState.webView.load(URLRequest(url: URL(string: "https://accounts.spotify.com/en/login?continue=https%3A%2F%2Fopen.spotify.com%2F")!))
@@ -112,18 +114,25 @@ struct ApiView: View {
         }
         .padding(.horizontal, 20)
         .navigationBarBackButtonHidden(true)
+        .onAppear {
+            spDcCookie = viewModel.userDefaultStorage.cookie
+        }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("didLogIn"))) { newValue in
             loggedIn = true
+            spDcCookie = viewModel.userDefaultStorage.cookie
         }
     }
     
     func checkForLogin() {
         Task {
             do {
-                try await ViewModel.shared.spotifyLyricProvider.generateAccessToken()
+                if !loginMethod {
+                    viewModel.userDefaultStorage.cookie = spDcCookie
+                }
+                try await viewModel.spotifyLyricProvider.generateAccessToken()
                 isShowingDetailView = true
                 errorMessage = nil
-                ViewModel.shared.userDefaultStorage.hasOnboarded = true
+                viewModel.userDefaultStorage.hasOnboarded = true
             } catch {
                 print("Failed to generate access token: \(error)")
                 errorMessage = String(describing: error)

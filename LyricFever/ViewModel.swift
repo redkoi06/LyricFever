@@ -241,6 +241,8 @@ import MediaRemoteAdapter
     private var currentSpotifyWatchdogTask: Task<Void, Never>?
     private var currentSpotifyEmptyLyricsRetryTask: Task<Void, Never>?
     private var currentRomanizationTask: Task<Void, Never>?
+    private var fetchRevision: UInt = 0
+    private var translationRevision: UInt = 0
     private var spotifyEmptyLyricsRetryCount = 0
     private var lastAppleMusicWatchdogTrackID: String?
     private var lastAppleMusicWatchdogPosition: TimeInterval?
@@ -666,14 +668,35 @@ import MediaRemoteAdapter
     
     @MainActor
     func translationTask(_ session: TranslationSession) async {
+        translationRevision &+= 1
+        let revision = translationRevision
+        let trackID = currentlyPlaying
+        let lyricsSnapshot = currentlyPlayingLyrics
+        guard !lyricsSnapshot.isEmpty else {
+            translatedLyric = []
+            isFetchingTranslation = false
+            return
+        }
+
         isFetchingTranslation = true
-        let translationResponse = await TranslationService.translationTask(session, request: currentlyPlayingLyrics.map { TranslationSession.Request(lyric: $0) })
-        
+        defer {
+            if translationRevision == revision {
+                isFetchingTranslation = false
+            }
+        }
+        let request = lyricsSnapshot.map { TranslationSession.Request(lyric: $0) }
+        let translationResponse = await TranslationService.translationTask(session, request: request)
+
+        guard !Task.isCancelled,
+              translationRevision == revision,
+              currentlyPlaying == trackID,
+              currentlyPlayingLyrics == lyricsSnapshot else {
+            return
+        }
+
         switch translationResponse {
             case .success(let array):
-                print("Translation Service: isFetchingTranslation set to false due to success")
-                isFetchingTranslation = false
-                if currentlyPlayingLyrics.count == array.count {
+                if lyricsSnapshot.count == array.count {
                     translatedLyric = array.map {
                         $0.targetText
                     }
@@ -683,8 +706,6 @@ import MediaRemoteAdapter
 //                try? await Task.sleep(for: .seconds(1))
                 translationSessionConfig = TranslationSession.Configuration(source: language, target: userLocaleLanguage)
             case .failure:
-                print("Translation Service: isFetchingTranslation set to false due to failure")
-                isFetchingTranslation = false
                 return
         }
     }
@@ -878,8 +899,10 @@ import MediaRemoteAdapter
         }
     }
 
-    private func spotifySyncLog(_ message: String) {
-        print("[LyricFever][SpotifySync] \(message)")
+    private func spotifySyncLog(_ message: @autoclosure () -> String) {
+        #if DEBUG
+        print("[LyricFever][SpotifySync] \(message())")
+        #endif
     }
 
     func refreshArtworkForCurrentTrack(reason: String) {
@@ -1232,18 +1255,16 @@ import MediaRemoteAdapter
         let spotifyTrackName = spotifyPlayer.trackName
         let spotifyPosition = spotifyPlayer.currentTime
         let spotifyIsPlaying = spotifyPlayer.isPlaying
-        let watchdogPosition = spotifyPosition.map { String($0) } ?? "nil"
-        let watchdogSummary = [
+        spotifySyncLog([
             "watchdog trackID=\(spotifyTrackID ?? "nil")",
             "name=\(spotifyTrackName ?? "nil")",
-            "position=\(watchdogPosition)",
+            "position=\(spotifyPosition.map { String($0) } ?? "nil")",
             "isPlaying=\(spotifyIsPlaying)",
             "internalTrackID=\(currentlyPlaying ?? "nil")",
             "lyricsCount=\(currentlyPlayingLyrics.count)",
             "isFetching=\(isFetching)",
             "emptyPostLoad=\(lyricsIsEmptyPostLoad)"
-        ].joined(separator: " ")
-        spotifySyncLog(watchdogSummary)
+        ].joined(separator: " "))
 
         isPlaying = spotifyIsPlaying
         guard spotifyIsPlaying else {
@@ -1451,7 +1472,6 @@ import MediaRemoteAdapter
             }
             let newIndex = currentlyPlayingLyricsIndex + 1
             if newIndex >= currentlyPlayingLyrics.count {
-                print("REACHED LAST LYRIC!!!!!!!!")
                 // if current time is before our current index's start time, the user has scrubbed and rewinded
                 // reset into linear search mode
                 if currentTime < currentlyPlayingLyrics[currentlyPlayingLyricsIndex].startTimeMS {
@@ -1463,7 +1483,6 @@ import MediaRemoteAdapter
                 return nil
             }
             else if  currentTime > currentlyPlayingLyrics[currentlyPlayingLyricsIndex].startTimeMS, currentTime < currentlyPlayingLyrics[newIndex].startTimeMS {
-                print("just the next lyric")
                 return newIndex
             }
         }
@@ -1495,10 +1514,7 @@ import MediaRemoteAdapter
             }
             let nextTimestamp = currentlyPlayingLyrics[lastIndex].startTimeMS
             let diff = nextTimestamp - currentTime
-            print("current time: \(currentTime)")
             self.currentTime = CurrentTimeWithStoredDate(currentTime: currentTime)
-            print("next time: \(nextTimestamp)")
-            print("the difference is \(diff)")
             guard diff.isFinite else {
                 spotifySyncLog("lyricUpdater stopping: non-finite timestamp difference current=\(currentTime) next=\(nextTimestamp)")
                 stopLyricUpdater()
@@ -1510,16 +1526,12 @@ import MediaRemoteAdapter
                 continue
             }
             try await Task.sleep(nanoseconds: UInt64(min(diff * 1_000_000, Double(UInt64.max))))
-            print("lyrics exist: \(!currentlyPlayingLyrics.isEmpty)")
-            print("last index: \(lastIndex)")
-            print("currently playing lryics index: \(currentlyPlayingLyricsIndex)")
             if currentlyPlayingLyrics.count > lastIndex {
                 currentlyPlayingLyricsIndex = lastIndex
             } else {
                 currentlyPlayingLyricsIndex = nil
                 
             }
-            print(currentlyPlayingLyricsIndex ?? "nil")
         } while !Task.isCancelled
     }
     
@@ -1595,14 +1607,19 @@ import MediaRemoteAdapter
         }
         spotifySyncLog("fetch start trackID=\(trackID) trackName=\(trackName) checkCoreDataFirst=\(checkCoreDataFirst) internalTrackID=\(currentlyPlaying ?? "nil") isFetching=\(isFetching) emptyPostLoad=\(lyricsIsEmptyPostLoad)")
         currentFetchTask?.cancel()
+        fetchRevision &+= 1
+        let revision = fetchRevision
         // i don't set isFetching to true here to prevent "flashes" for CoreData fetches
         defer {
-            isFetching = false
-            spotifySyncLog("fetch end trackID=\(trackID) internalTrackID=\(currentlyPlaying ?? "nil") lyricsCount=\(currentlyPlayingLyrics.count) isFetching=\(isFetching) emptyPostLoad=\(lyricsIsEmptyPostLoad)")
+            if fetchRevision == revision {
+                isFetching = false
+                spotifySyncLog("fetch end trackID=\(trackID) internalTrackID=\(currentlyPlaying ?? "nil") lyricsCount=\(currentlyPlayingLyrics.count) isFetching=\(isFetching) emptyPostLoad=\(lyricsIsEmptyPostLoad)")
+            }
         }
-        currentFetchTask = Task { try await self.fetchLyrics(for: trackID, trackName, checkCoreDataFirst: checkCoreDataFirst) }
+        let fetchTask = Task { try await self.fetchLyrics(for: trackID, trackName, checkCoreDataFirst: checkCoreDataFirst) }
+        currentFetchTask = fetchTask
         do {
-            return try await currentFetchTask?.value
+            return try await fetchTask.value
         } catch {
             spotifySyncLog("fetch failed trackID=\(trackID) error=\(error)")
             return nil

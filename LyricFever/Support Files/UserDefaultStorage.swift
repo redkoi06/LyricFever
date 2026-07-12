@@ -53,9 +53,20 @@ class UserDefaultStorage {
     @ObservationIgnored var karaokeModeHoveringSetting: Bool
     #endif
 
-//    @DefaultsKey(userDefaultsKey: "spDcCookie")
-    @ObservableUserDefault(.init(key: "spDcCookie", defaultValue: "", store: .standard))
-    @ObservationIgnored var cookie: String
+    private var spotifyCookie: String
+
+    var cookie: String {
+        get { spotifyCookie }
+        set {
+            spotifyCookie = newValue
+            do {
+                try CredentialStore.saveSpotifyCookie(newValue)
+                UserDefaults.standard.removeObject(forKey: "spDcCookie")
+            } catch {
+                print("[LyricFever][Security] failed to update Spotify credential: \(error)")
+            }
+        }
+    }
     
     #if os(macOS)
     // False: Spotify, True: Apple Music
@@ -68,4 +79,23 @@ class UserDefaultStorage {
     @ObservationIgnored var hasTranslated: Bool
     @ObservableUserDefault(.init(key: "truncationLength", defaultValue: 10, store: .standard))
     @ObservationIgnored var truncationLength: Int
+
+    init() {
+        let legacyCookie = UserDefaults.standard.string(forKey: "spDcCookie") ?? ""
+        do {
+            if let storedCookie = try CredentialStore.spotifyCookie(), !storedCookie.isEmpty {
+                spotifyCookie = storedCookie
+                UserDefaults.standard.removeObject(forKey: "spDcCookie")
+            } else {
+                spotifyCookie = legacyCookie
+                if !legacyCookie.isEmpty {
+                    try CredentialStore.saveSpotifyCookie(legacyCookie)
+                    UserDefaults.standard.removeObject(forKey: "spDcCookie")
+                }
+            }
+        } catch {
+            spotifyCookie = legacyCookie
+            print("[LyricFever][Security] Spotify credential migration deferred: \(error)")
+        }
+    }
 }
