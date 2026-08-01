@@ -9,6 +9,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LyricFever.Windows.App", "s
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LyricFever.Core", "src\LyricFever.Core\LyricFever.Core.csproj", "{A81E5B1E-90B1-4935-8FC8-223B058EFA0B}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{C3920DDA-213A-4E03-9327-A9533B86789F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LyricFever.Core.Tests", "tests\LyricFever.Core.Tests\LyricFever.Core.Tests.csproj", "{47E717C0-1C78-4096-ACEE-AB6D0D1B4D28}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -26,9 +30,14 @@ Global
 		{A81E5B1E-90B1-4935-8FC8-223B058EFA0B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A81E5B1E-90B1-4935-8FC8-223B058EFA0B}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A81E5B1E-90B1-4935-8FC8-223B058EFA0B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{47E717C0-1C78-4096-ACEE-AB6D0D1B4D28}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{47E717C0-1C78-4096-ACEE-AB6D0D1B4D28}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{47E717C0-1C78-4096-ACEE-AB6D0D1B4D28}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{47E717C0-1C78-4096-ACEE-AB6D0D1B4D28}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{76F1267C-480F-4EDD-B510-0DD0B08C6F62} = {339F1CD0-842E-49C5-BC16-0F02CEFB0B87}
 		{A81E5B1E-90B1-4935-8FC8-223B058EFA0B} = {339F1CD0-842E-49C5-BC16-0F02CEFB0B87}
+		{47E717C0-1C78-4096-ACEE-AB6D0D1B4D28} = {C3920DDA-213A-4E03-9327-A9533B86789F}
 	EndGlobalSection
 EndGlobal
