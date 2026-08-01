@@ -32,9 +32,26 @@ public partial class SpotifyLoginWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"无法启动登录页面：{ex.Message}\n\n可改用“手动粘贴 sp_dc Cookie”方式。", "Lyric Fever");
-            Close();
+            // 窗口保留：手动粘贴入口仍然可用
+            System.Diagnostics.Debug.WriteLine($"[LyricFever][Login] WebView2 unavailable: {ex.Message}");
+            WebView.Visibility = System.Windows.Visibility.Collapsed;
+            MessageBox.Show("无法启动登录页面（WebView2 不可用）。\n可在窗口下方手动粘贴 sp_dc Cookie。", "Lyric Fever");
         }
+    }
+
+    /// <summary>手动粘贴 sp_dc Cookie：安全保存（DPAPI）并立即注入运行中的 Provider。</summary>
+    private void OnSaveCookieClicked(object sender, RoutedEventArgs e)
+    {
+        var value = CookieInput.Text?.Trim();
+        if (string.IsNullOrEmpty(value))
+        {
+            MessageBox.Show("请输入 sp_dc Cookie 值。", "Lyric Fever");
+            return;
+        }
+        CredentialStore.Set("spotify.sp_dc", value);
+        App.CurrentApp.MainViewModel?.OnSpotifyLoggedIn(value);
+        MessageBox.Show("已保存 sp_dc Cookie。", "Lyric Fever");
+        Close();
     }
 
     private async void OnNavigationStarting(object? sender,

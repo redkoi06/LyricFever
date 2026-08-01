@@ -298,7 +298,7 @@ public sealed class SpotifyLyricProvider : ILyricProvider
         return await response.Content.ReadAsByteArrayAsync(ct);
     }
 
-    private static void CheckStatus(System.Net.HttpStatusCode status)
+    internal static void CheckStatus(System.Net.HttpStatusCode status)
     {
         var code = (int)status;
         if (code == 401) throw new SpotifyLyricError(SpotifyLyricError.ErrorKind.Unauthorized);

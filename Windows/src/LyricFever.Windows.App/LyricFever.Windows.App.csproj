@@ -23,15 +23,17 @@
   </PropertyGroup>
 
   <!-- LibNMeCab.IpaDicBin 0.10.0 的旧式 targets 在 SDK 项目不生效：
-       手动从 NuGet 缓存复制 IPAdic 词典到输出目录（发布打包脚本同样处理）。 -->
-  <Target Name="CopyIpaDic" AfterTargets="Build">
+       手动从 NuGet 缓存复制 IPAdic 词典到输出目录（build 与 publish 均复制）。 -->
+  <Target Name="CopyIpaDic" AfterTargets="Build;Publish">
     <PropertyGroup>
       <IpaDicSource>$(NuGetPackageRoot)libnmecab.ipadicbin\0.10.0\content\IpaDic</IpaDicSource>
+      <IpaDicTarget Condition="'$(PublishDir)' != ''">$(PublishDir)IpaDic</IpaDicTarget>
+      <IpaDicTarget Condition="'$(PublishDir)' == ''">$(OutDir)IpaDic</IpaDicTarget>
     </PropertyGroup>
     <ItemGroup>
       <IpaDicFiles Include="$(IpaDicSource)\*.*" />
     </ItemGroup>
-    <Copy SourceFiles="@(IpaDicFiles)" DestinationFolder="$(OutDir)IpaDic"
+    <Copy SourceFiles="@(IpaDicFiles)" DestinationFolder="$(IpaDicTarget)"
           Condition="Exists('$(IpaDicSource)')" SkipUnchangedFiles="true" />
   </Target>
 

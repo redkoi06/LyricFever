@@ -29,7 +29,6 @@ public sealed class AppSettings
     public double KaraokeFontSize { get; set; } = 24;
     public double KaraokeOpacity { get; set; } = 0.9;
     public bool KaraokeUseBackgroundColor { get; set; } = true;
-    public double KaraokeBackgroundColor { get; set; }
     /// <summary>歌词进度偏移（毫秒，正数提前显示）。</summary>
     public int LyricOffsetMs { get; set; }
 

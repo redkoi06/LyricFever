@@ -50,6 +50,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _watcher.TrackChanged += OnTrackChanged;
         _watcher.PositionChanged += OnPositionChanged;
         _watcher.PlaybackStateChanged += OnPlaybackStateChanged;
+        _watcher.SpotifySessionChanged += OnSpotifySessionChanged;
     }
 
     // ---- 对外状态 ----
@@ -147,6 +148,21 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (IsPlaying == isPlaying) return;
         IsPlaying = isPlaying;
         Raise(nameof(IsPlaying));
+    }
+
+    /// <summary>可接受 session 消失（如 Spotify 退出或切到其他播放器）：清空当前曲目状态。</summary>
+    private void OnSpotifySessionChanged(bool hasSession)
+    {
+        if (hasSession) return;
+        CancelCurrentWork();
+        ResetLyricsState();
+        _lastPositionMs = -1;
+        CurrentTitle = "";
+        CurrentArtist = "";
+        CurrentAlbum = "";
+        IsPlaying = false;
+        Raise(nameof(IsPlaying));
+        RaiseStateChanged();
     }
 
     // ---- 切歌/刷新统一流程 ----
@@ -266,7 +282,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private async Task RequestTranslationAndRomanizationAsync(string trackId, List<LyricLine> lyrics, int version,
         CancellationToken token)
     {
-        var lang = LanguageDetector.Detect(lyrics);
+        // 设置页 SourceLanguage 覆盖自动检测（auto → 自动识别）
+        var lang = AppSettings.Current.SourceLanguage switch
+        {
+            "en" => LyricLanguage.English,
+            "ja" => LyricLanguage.Japanese,
+            _ => LanguageDetector.Detect(lyrics)
+        };
         if (lang is not (LyricLanguage.English or LyricLanguage.Japanese)) return;
 
         var (translated, romanized) = await _translationPipeline.ProcessAsync(
@@ -301,6 +323,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _watcher.TrackChanged -= OnTrackChanged;
         _watcher.PositionChanged -= OnPositionChanged;
         _watcher.PlaybackStateChanged -= OnPlaybackStateChanged;
+        _watcher.SpotifySessionChanged -= OnSpotifySessionChanged;
         CancelCurrentWork();
     }
 

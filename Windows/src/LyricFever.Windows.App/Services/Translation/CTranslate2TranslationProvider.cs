@@ -25,8 +25,8 @@ public sealed class CTranslate2TranslationProvider : ITranslationProvider
         get { lock (_lock) return _loadedLanguage != null; }
     }
 
-    /// <summary>模型可用性（供设置页显示下载状态）。</summary>
-    public bool IsModelDownloaded(LyricLanguage lang) => Directory.Exists(ModelDirFor(lang));
+    /// <summary>模型可用性（按必需文件校验，而非仅目录存在）。</summary>
+    public bool IsModelDownloaded(LyricLanguage lang) => ModelInstallService.IsComplete(ModelDirFor(lang));
 
     public static string ModelDirFor(LyricLanguage lang) =>
         Path.Combine(ModelsDir, lang == LyricLanguage.Japanese ? "ja-zh" : "en-zh");
@@ -49,8 +49,11 @@ public sealed class CTranslate2TranslationProvider : ITranslationProvider
             lock (_lock)
             {
                 if (_loadedLanguage == sourceLanguage) return;
+                // inter_threads=1, intra_threads=1：
+                // 低负载优先（用户定案精神）；实测 intra=2 在 CTranslate2 3.24 + oneDNN 3.14
+                // 组合下，推理后析构（空闲卸载）会死锁（见 .tdebug 探针复现），intra=1 稳定。
                 UnloadLocked();
-                var rc = lf_load_model(modelDir, 1, 2); // inter_threads=1, intra_threads=2（用户定案）
+                var rc = lf_load_model(modelDir, 1, 1);
                 if (rc != 0) throw new InvalidOperationException($"模型加载失败（错误码 {rc}）");
                 _loadedLanguage = sourceLanguage;
             }

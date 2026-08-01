@@ -20,7 +20,8 @@ public sealed class MediaTrackInfo
 
 /// <summary>
 /// SMTC（System Media Transport Controls）监听服务 —— Windows 版 MediaRemote + ScriptingBridge 替代。
-/// 读取任意 SMTC 集成应用（Spotify、Apple Music 等）的播放状态、曲目与进度，并支持播放控制。
+/// 读取 SMTC 集成应用（Spotify、Apple Music 等）的播放状态、曲目与进度，并支持播放控制。
+/// SpotifyOnly=true（默认）时只接受 Spotify session，其他播放器不当作当前曲目（P0-D）。
 /// </summary>
 public sealed class MediaSessionWatcher : IDisposable
 {
@@ -35,6 +36,13 @@ public sealed class MediaSessionWatcher : IDisposable
     public event Action<double>? PositionChanged;
     /// <summary>播放/暂停状态变化。</summary>
     public event Action<bool>? PlaybackStateChanged;
+    /// <summary>可接受 session 存在性变化（false = “未检测到 Spotify”）。</summary>
+    public event Action<bool>? SpotifySessionChanged;
+
+    /// <summary>仅接受 Spotify session（由 UseSpotify 设置驱动）。</summary>
+    public bool SpotifyOnly { get; set; } = true;
+
+    public bool HasSpotifySession { get; private set; }
 
     public bool IsRunning { get; private set; }
 
@@ -54,8 +62,25 @@ public sealed class MediaSessionWatcher : IDisposable
         IsRunning = true;
     }
 
+    /// <summary>设置变更后重新评估当前 session（UseSpotify 切换时调用）。</summary>
+    public void ApplySessionFilter() => Attach(_manager?.GetCurrentSession());
+
+    private static bool IsSpotifySession(GlobalSystemMediaTransportControlsSession session)
+    {
+        var appId = session.SourceAppUserModelId;
+        if (string.IsNullOrEmpty(appId)) return false;
+        // Spotify 桌面客户端与 Microsoft Store 版的 AppId
+        return appId.StartsWith("Spotify", StringComparison.OrdinalIgnoreCase)
+               || appId.Contains("SpotifyAB.SpotifyMusic", StringComparison.OrdinalIgnoreCase);
+    }
+
     private void Attach(GlobalSystemMediaTransportControlsSession? session)
     {
+        // P0-D：session 过滤 —— 非 Spotify 播放器不当作当前曲目
+        var acceptable = session != null && (!SpotifyOnly || IsSpotifySession(session));
+        SetHasSpotifySession(acceptable);
+        if (!acceptable) session = null;
+
         if (_session != null)
         {
             _session.MediaPropertiesChanged -= OnMediaPropertiesChanged;
@@ -71,6 +96,13 @@ public sealed class MediaSessionWatcher : IDisposable
         }
         _lastTrack = null;
         _ = RefreshTrackAsync();
+    }
+
+    private void SetHasSpotifySession(bool has)
+    {
+        if (HasSpotifySession == has) return;
+        HasSpotifySession = has;
+        SpotifySessionChanged?.Invoke(has);
     }
 
     private void OnCurrentSessionChanged(GlobalSystemMediaTransportControlsSessionManager sender,
@@ -90,11 +122,13 @@ public sealed class MediaSessionWatcher : IDisposable
 
     private async Task RefreshTrackAsync()
     {
-        if (_session == null) return;
+        var session = _session;
+        if (session == null) return;
         try
         {
-            var props = await _session.TryGetMediaPropertiesAsync();
-            if (props == null) return;
+            var props = await session.TryGetMediaPropertiesAsync();
+            // P0-D：异步返回后确认仍是当前 session（防跨 session 覆盖）
+            if (props == null || !ReferenceEquals(_session, session)) return;
 
             var timeline = _session.GetTimelineProperties();
             var playback = _session.GetPlaybackInfo();

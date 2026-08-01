@@ -14,11 +14,13 @@ namespace LyricFever.Windows.App;
 public partial class App : Application
 {
     private TrayIconService? _trayIcon;
+    private MediaSessionWatcher? _watcher;
 
     public MainViewModel? MainViewModel { get; private set; }
     public SpotifyLyricProvider SpotifyProvider { get; private set; } = new();
     public LyricsRepository? LyricsRepository { get; private set; }
     public TranslationCache? TranslationCache { get; private set; }
+    public MediaSessionWatcher? Watcher => _watcher;
 
     public static App CurrentApp => (App)Current;
 
@@ -39,13 +41,13 @@ public partial class App : Application
         var trackMapper = new SpotifyTrackMapper(SpotifyProvider, db);
         var fetchService = new LyricFetchService(LyricsRepository,
             new ILyricProvider[] { SpotifyProvider, new LrclibLyricProvider(), new NetEaseLyricProvider() });
-        var watcher = new MediaSessionWatcher();
+        _watcher = new MediaSessionWatcher { SpotifyOnly = AppSettings.Current.UseSpotify };
         var translationPipeline = new TranslationPipelineService(
             new CTranslate2TranslationProvider(),
             new KawazuRomanizationProvider(),
             TranslationCache);
 
-        MainViewModel = new MainViewModel(watcher, trackMapper, fetchService, LyricsRepository, translationPipeline);
+        MainViewModel = new MainViewModel(_watcher, trackMapper, fetchService, LyricsRepository, translationPipeline);
         _trayIcon = new TrayIconService(MainViewModel);
         _trayIcon.Initialize();
 
@@ -55,6 +57,8 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         _trayIcon?.Dispose();
+        MainViewModel?.Dispose();
+        _watcher?.Dispose();
         base.OnExit(e);
     }
 }
