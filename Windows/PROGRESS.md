@@ -13,8 +13,8 @@
 | P1 | 歌词引擎（LRC 解析、匹配、同步、Provider、SQLite 缓存、语言检测） | ✅ 完成（43/43 单元测试通过） |
 | P2 | Spotify 集成（SMTC、track 映射、DPAPI、WebView2 登录、主流程 ViewModel） | ⚠️ 代码完成 + P0-D 修复完成；真实 Spotify E2E 未验收 |
 | P3 | K 歌悬浮窗（置顶透明 NOACTIVATE、拖动吸附、三层歌词高亮、封面色） | ⚠️ 代码完成；人工视觉/多显示器验收未做 |
-| P4 | 翻译/罗马音管线 | ⚠️ 模型 + 管线实现完成；真实歌词 E2E 与性能基准未完成 |
-| P5 | 打包发布 | ⚠️ portable 目录已验证；安装包 + 清洁环境未完成 |
+| P4 | 翻译/罗马音管线 | ⚠️ 管线集成探针全部通过（缓存 4ms/取消/空行/换模型）；真实 Spotify 播放 E2E 未验收 |
+| P5 | 打包发布 | ✅ 安装包已产出并验证安装/启动/卸载闭环；清洁环境首次部署验证通过 |
 
 ---
 
@@ -36,13 +36,14 @@
 - 关闭翻译不加载模型；只开罗马音不加载翻译模型。
 - 网络请求 15s 超时 + 取消 token。
 
-### P0-C：发布链路 —— ✅ portable 目录已验证
+### P0-C：发布链路 —— ✅ portable 目录 + 安装包已验证
 
-- `publish.ps1` 严格 manifest：任一必需文件缺失/为空即失败退出（实测：IpaDic 缺失时正确报错）。
-- 输出 `Windows/publish/LyricFever/`（591MB）：exe + 托管依赖 + LyricFeverTranslation.dll + dnnl.dll + 双模型（en-zh/ja-zh 各 5 文件）+ IPAdic + model_manifest.json（SHA256）。
+- `publish.ps1` 严格 manifest：任一必需文件缺失/为空即失败退出（实测：IpaDic 缺失时正确报错）；幂等（每次全量清理）。
+- 输出 `Windows/publish/LyricFever/`（433MB）：exe + 托管依赖 + LyricFeverTranslation.dll + dnnl.dll + 双模型（en-zh/ja-zh 各 5 文件）+ IPAdic + model_manifest.json（SHA256）。
 - 从 publish 目录启动冒烟通过；native 探针用 publish 产物 DLL + 模型验证：
   - en-zh：20 行批量 213ms，unload/reload 正常
   - ja-zh：20 行批量 96ms，unload/reload 正常
+- **新发现并修复（发布阻断级）**：C# 侧 `lf_translate_batch` P/Invoke 使用 `ArraySubType=LPUTF8Str`（.NET 8 运行时非法，直接抛 MarshalDirectiveException）→ 翻译调用从未真正成功过；改为手动 `StringToCoTaskMemUTF8` 指针数组。
 - **新发现并修复**：CTranslate2 3.24 + oneDNN 3.14 组合下，`intra_threads=2` 推理后析构（空闲卸载）死锁；已改为 `intra_threads=1`（探针实测稳定，负载更低，翻译速度仍远优于需求）。
 - IpaDic 复制修复：csproj CopyIpaDic target 同时覆盖 Build 与 Publish。
 
@@ -82,21 +83,29 @@
 
 - `dotnet build LyricFever.Windows.sln -c Release`：0 错误 0 警告
 - `dotnet test LyricFever.Windows.sln -c Release`：43/43 通过
-- `publish.ps1`：完整资产时成功（591MB），缺 IpaDic 时失败退出
+- `publish.ps1`：完整资产时成功（433MB），缺 IpaDic 时失败退出，幂等可重跑
 - publish 目录启动冒烟：进程存活（托盘常驻）
 - native 探针（publish 产物 DLL + 模型）：en-zh/ja-zh load=0、translate=0、unload/reload 正常
+- **管线集成探针**（真实 CT2 + Kawazu + SQLite，22 行英文 + 20 行日文真实歌词）：
+  - 英译 423ms、日译+罗马音 442ms、语言切换重载 175ms
+  - 空行占位正确、等长、日文罗马音语义正确
+  - **缓存命中 4ms**（用户核心要求：命中不重新调用模型）
+  - 任务取消抛 OperationCanceledException；过期任务结果丢弃
 - 英文翻译（DLL 实测）：`I can't help falling in love with you → 我无法忍心爱上你`
 - 日文翻译（CT2 验证）：`君の声が聞こえる → 我听见你的声音`
 - 罗马音（DLL 实测）：`君の声が聞こえる → kimi no koe ga kikoeru`
+- **安装包**（Inno Setup 6.7.3）：`publish/LyricFeverSetup-1.0.0.exe`（195MB，lzma2/ultra）
+  - 静默安装 → 安装副本独立启动 OK → 静默卸载 → 目录清空 ✅
+  - WebView2 Runtime 已装（150.0.4078.105）；缺失时登录窗口降级为手动粘贴 sp_dc
+  - 清洁环境模型部署（bundled → %APPDATA% → 翻译成功）已验证
 - git diff --check 通过
 
 ---
 
 ## 五、未完成 / 待验收（不得标注为完成）
 
-1. **阶段 C/D/E**：真实 Spotify E2E（登录→播放→歌词→翻译/罗马音→缓存命中→切歌 20 次→单曲循环 5 次）、K 歌窗口人工验收（多显示器/焦点/视觉）、翻译/罗马音开关组合、缓存命中不加载模型。
-2. **阶段 F**：清洁环境（无 native 目录/无 %APPDATA% 缓存）首次启用英译/日译/罗马音验证、WebView2 Runtime 前置条件验证、安装包。
-3. **已知边界**：ja-zh 换源模型/工具链变更时必须重跑 convert_ja_zh.py 校验；intra=1 的翻译性能基准（20 行 <250ms，已满足低负载目标）。
+1. **阶段 C/D 人工验收**：真实 Spotify E2E（登录→播放→歌词→翻译/罗马音→切歌 20 次→单曲循环 5 次）、K 歌窗口人工验收（多显示器/焦点/视觉/右键菜单）、托盘交互、设置项持久化。这些需要用户在真实环境中操作（本机无 Spotify 会话/凭据，无法自动化）。
+2. **已知边界**：ja-zh 换源模型/工具链变更时必须重跑 convert_ja_zh.py 校验；安装包未代码签名（首次运行可能有 SmartScreen 提示，需用户确认）；intra=1 的翻译性能基准（20 行 <250ms，已满足低负载目标）。
 
 ---
 

@@ -6,6 +6,9 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $out = Join-Path $root "publish\LyricFever"
 
+# ---- 0. 清理旧输出（幂等发布，避免 Copy-Item 嵌套复制） ----
+if (Test-Path $out) { Remove-Item $out -Recurse -Force }
+
 # ---- 1. dotnet publish ----
 Write-Host "[1/5] dotnet publish (self-contained)..." -ForegroundColor Cyan
 dotnet publish (Join-Path $root "src\LyricFever.Windows.App\LyricFever.Windows.App.csproj") `
@@ -79,5 +82,5 @@ foreach ($f in $required) {
 if ($missing.Count -gt 0) { throw "Missing required files: $($missing -join ', ')" }
 
 $size = (Get-ChildItem $out -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB
-Write-Host "Done. Output: $out (${size:N0} MB)" -ForegroundColor Green
+Write-Host ("Done. Output: {0} ({1:N0} MB)" -f $out, $size) -ForegroundColor Green
 Write-Host "Manifest: $out\models\model_manifest.json" -ForegroundColor Green

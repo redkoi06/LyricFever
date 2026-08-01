@@ -101,10 +101,25 @@ public sealed class CTranslate2TranslationProvider : ITranslationProvider
             int rc;
             IntPtr outLines;
             int outCount;
-            lock (_lock)
+
+            // string[] 的 ArraySubType=LPUTF8Str 在 .NET 8 不合法（运行时抛
+            // MarshalDirectiveException）；手动转为 UTF-8 指针数组（native 端
+            // 期望 char**，UTF-8）。
+            var linePtrs = new IntPtr[lines.Length];
+            for (var i = 0; i < lines.Length; i++)
+                linePtrs[i] = Marshal.StringToCoTaskMemUTF8(lines[i] ?? "");
+            try
             {
-                rc = lf_translate_batch(lines, lines.Length, srcCode, tgtCode,
-                    out outLines, out outCount);
+                lock (_lock)
+                {
+                    rc = lf_translate_batch(linePtrs, linePtrs.Length, srcCode, tgtCode,
+                        out outLines, out outCount);
+                }
+            }
+            finally
+            {
+                foreach (var ptr in linePtrs)
+                    if (ptr != IntPtr.Zero) Marshal.FreeCoTaskMem(ptr);
             }
             if (rc != 0) throw new InvalidOperationException($"翻译失败（错误码 {rc}）");
 
@@ -143,7 +158,7 @@ public sealed class CTranslate2TranslationProvider : ITranslationProvider
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     private static extern int lf_translate_batch(
-        [In, MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPUTF8Str)] string[] lines,
+        [In] IntPtr[] lines,
         int count,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string sourceLang,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string targetLang,
