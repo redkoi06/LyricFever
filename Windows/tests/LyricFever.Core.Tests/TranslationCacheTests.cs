@@ -64,13 +64,17 @@ public class TranslationCacheTests : IDisposable
     }
 
     [Fact]
-    public void MismatchedLineCountRejected()
+    public void ShortTranslationPaddedToLyricLength()
     {
         var cache = MakeCache();
         var lyrics = Lyrics((1000, "Hello"), (2000, "World"));
         cache.Put("track1", lyrics, "en", "zh", 1, 1,
             new List<string> { "你好" }, new List<string>());
 
-        Assert.Null(cache.Get("track1", lyrics, "en", "zh", 1, 1));
+        // Put 内部补齐等长（缺失行空字符串占位），Get 仍命中
+        var hit = cache.Get("track1", lyrics, "en", "zh", 1, 1);
+        Assert.NotNull(hit);
+        Assert.Equal(new[] { "你好", "" }, hit!.Value.Translated);
+        Assert.Equal(new[] { "", "" }, hit.Value.Romanized);
     }
 }

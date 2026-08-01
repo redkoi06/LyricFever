@@ -86,6 +86,10 @@ public sealed class TranslationCache
     {
         var key = BuildKey(trackId, lyrics, sourceLanguage, targetLanguage, modelVersion, romanizationVersion);
 
+        // 规范化：三个数组必须与歌词等长（与 macOS 版约定一致，缺失行用空字符串占位）
+        translated = PadToLength(translated, lyrics.Count);
+        romanized = PadToLength(romanized, lyrics.Count);
+
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
@@ -122,6 +126,16 @@ public sealed class TranslationCache
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "DELETE FROM TranslationCache";
         cmd.ExecuteNonQuery();
+    }
+
+    private static List<string> PadToLength(List<string> values, int length)
+    {
+        if (values.Count == length) return values;
+        var padded = new List<string>(length);
+        padded.AddRange(values);
+        while (padded.Count < length) padded.Add("");
+        if (padded.Count > length) padded = padded.GetRange(0, length);
+        return padded;
     }
 
     private static string BuildKey(string trackId, List<LyricLine> lyrics, string sourceLanguage,
