@@ -96,3 +96,14 @@ Lyric Fever.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 # .NET build outputs
 Windows/**/bin/
 Windows/**/obj/
+
+# Native build artifacts & third-party sources
+Windows/native/CTranslate2/
+Windows/native/sentencepiece/
+Windows/native/models-src/
+Windows/native/models/
+Windows/native/**/build/
+Windows/publish/
+Windows/native/oneDNN/
+Windows/.tdebug/
+Windows/native/models-src/*-pt/
