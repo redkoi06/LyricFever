@@ -32,6 +32,19 @@ public sealed class TrayIconService : IDisposable
             ContextMenu = CreateContextMenu()
         };
         _trayIcon.TrayLeftMouseUp += (_, _) => ToggleLyricsWindow();
+        ShowLyricsWindow();
+    }
+
+    public void ShowLyricsWindow()
+    {
+        if (_karaokeWindow == null)
+        {
+            _karaokeWindow = new KaraokeWindow(_viewModel);
+            _karaokeWindow.Closed += (_, _) => _karaokeWindow = null;
+        }
+
+        if (!_karaokeWindow.IsVisible)
+            _karaokeWindow.Show();
     }
 
     private void ToggleLyricsWindow()
@@ -48,7 +61,7 @@ public sealed class TrayIconService : IDisposable
         }
         else
         {
-            _karaokeWindow.Show();
+            ShowLyricsWindow();
         }
     }
 

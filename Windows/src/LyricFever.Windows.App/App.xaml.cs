@@ -15,18 +15,34 @@ public partial class App : Application
 {
     private TrayIconService? _trayIcon;
     private MediaSessionWatcher? _watcher;
+    private SingleInstanceCoordinator? _singleInstance;
 
     public MainViewModel? MainViewModel { get; private set; }
     public SpotifyLyricProvider SpotifyProvider { get; private set; } = new();
     public LyricsRepository? LyricsRepository { get; private set; }
     public TranslationCache? TranslationCache { get; private set; }
     public MediaSessionWatcher? Watcher => _watcher;
+    public bool IsVisualInspectionMode { get; private set; }
 
     public static App CurrentApp => (App)Current;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        IsVisualInspectionMode = e.Args.Contains("--visual-inspection", StringComparer.OrdinalIgnoreCase);
+        AppLog.Initialize();
+        AppLog.Info("App", $"visualInspection={IsVisualInspectionMode}, preferredPlayer={AppSettings.Current.PreferredPlayer}");
+        DispatcherUnhandledException += (_, args) => AppLog.Error("Dispatcher", args.Exception);
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            if (args.ExceptionObject is Exception exception) AppLog.Error("AppDomain", exception);
+        };
+
+        if (!SingleInstanceCoordinator.TryAcquire(out _singleInstance))
+        {
+            Shutdown(0);
+            return;
+        }
 
         // 数据层
         var db = new SqliteDatabase();
@@ -41,7 +57,10 @@ public partial class App : Application
         var trackMapper = new SpotifyTrackMapper(SpotifyProvider, db);
         var fetchService = new LyricFetchService(LyricsRepository,
             new ILyricProvider[] { SpotifyProvider, new LrclibLyricProvider(), new NetEaseLyricProvider() });
-        _watcher = new MediaSessionWatcher { SpotifyOnly = AppSettings.Current.UseSpotify };
+        _watcher = new MediaSessionWatcher
+        {
+            PreferredPlayer = ParsePlayerPreference(AppSettings.Current.PreferredPlayer)
+        };
         var translationPipeline = new TranslationPipelineService(
             new CTranslate2TranslationProvider(),
             new KawazuRomanizationProvider(),
@@ -50,15 +69,25 @@ public partial class App : Application
         MainViewModel = new MainViewModel(_watcher, trackMapper, fetchService, LyricsRepository, translationPipeline);
         _trayIcon = new TrayIconService(MainViewModel);
         _trayIcon.Initialize();
+        _singleInstance!.StartListening(() => Dispatcher.BeginInvoke(_trayIcon.ShowLyricsWindow));
 
         await MainViewModel.StartAsync();
+        AppLog.Info("App", "startup completed");
     }
+
+    internal static MediaPlayerPreference ParsePlayerPreference(string? value) => value switch
+    {
+        "Spotify" => MediaPlayerPreference.Spotify,
+        "Any" => MediaPlayerPreference.Any,
+        _ => MediaPlayerPreference.AppleMusic
+    };
 
     protected override void OnExit(ExitEventArgs e)
     {
         _trayIcon?.Dispose();
         MainViewModel?.Dispose();
         _watcher?.Dispose();
+        _singleInstance?.Dispose();
         base.OnExit(e);
     }
 }

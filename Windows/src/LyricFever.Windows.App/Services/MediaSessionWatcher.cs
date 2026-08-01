@@ -1,5 +1,6 @@
 using System.Windows.Threading;
 using System.Runtime.InteropServices.WindowsRuntime;
+using LyricFever.Core.Lyrics;
 using Windows.Media.Control;
 
 namespace LyricFever.Windows.App.Services;
@@ -21,7 +22,7 @@ public sealed class MediaTrackInfo
 /// <summary>
 /// SMTC（System Media Transport Controls）监听服务 —— Windows 版 MediaRemote + ScriptingBridge 替代。
 /// 读取 SMTC 集成应用（Spotify、Apple Music 等）的播放状态、曲目与进度，并支持播放控制。
-/// SpotifyOnly=true（默认）时只接受 Spotify session，其他播放器不当作当前曲目（P0-D）。
+/// 按用户选择显式绑定 Apple Music、Spotify 或系统当前播放器，避免把浏览器误当成当前曲目。
 /// </summary>
 public sealed class MediaSessionWatcher : IDisposable
 {
@@ -36,13 +37,13 @@ public sealed class MediaSessionWatcher : IDisposable
     public event Action<double>? PositionChanged;
     /// <summary>播放/暂停状态变化。</summary>
     public event Action<bool>? PlaybackStateChanged;
-    /// <summary>可接受 session 存在性变化（false = “未检测到 Spotify”）。</summary>
-    public event Action<bool>? SpotifySessionChanged;
+    /// <summary>首选播放器 session 存在性变化。</summary>
+    public event Action<bool>? MediaSessionAvailabilityChanged;
 
-    /// <summary>仅接受 Spotify session（由 UseSpotify 设置驱动）。</summary>
-    public bool SpotifyOnly { get; set; } = true;
+    public MediaPlayerPreference PreferredPlayer { get; set; } = MediaPlayerPreference.AppleMusic;
 
-    public bool HasSpotifySession { get; private set; }
+    public bool HasMediaSession { get; private set; }
+    public string? CurrentSourceAppId => _session?.SourceAppUserModelId;
 
     public bool IsRunning { get; private set; }
 
@@ -56,19 +57,38 @@ public sealed class MediaSessionWatcher : IDisposable
     {
         if (IsRunning) return;
         _manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
+        AppLog.Info("SMTC", $"manager ready; preferred={PreferredPlayer}");
         _manager.CurrentSessionChanged += OnCurrentSessionChanged;
-        Attach(_manager.GetCurrentSession());
+        _manager.SessionsChanged += OnSessionsChanged;
+        Attach(SelectPreferredSession());
         _timelineTimer.Start();
         IsRunning = true;
     }
 
-    /// <summary>设置变更后重新评估当前 session（UseSpotify 切换时调用）。</summary>
-    public void ApplySessionFilter() => Attach(_manager?.GetCurrentSession());
+    /// <summary>设置变更后重新评估当前 session。</summary>
+    public void ApplySessionFilter() => Attach(SelectPreferredSession());
 
-    private static bool IsSpotifySession(GlobalSystemMediaTransportControlsSession session)
+    private GlobalSystemMediaTransportControlsSession? SelectPreferredSession()
     {
-        var appId = session.SourceAppUserModelId;
-        if (string.IsNullOrEmpty(appId)) return false;
+        if (_manager == null) return null;
+        if (PreferredPlayer == MediaPlayerPreference.Any)
+            return _manager.GetCurrentSession();
+
+        var sessions = _manager.GetSessions();
+        AppLog.Info("SMTC", $"sessions=[{string.Join(", ", sessions.Select(session => session.SourceAppUserModelId))}]");
+        return PreferredPlayer == MediaPlayerPreference.AppleMusic
+            ? sessions.FirstOrDefault(session => IsAppleMusicAppId(session.SourceAppUserModelId))
+            : sessions.FirstOrDefault(session => IsSpotifyAppId(session.SourceAppUserModelId));
+    }
+
+    internal static bool IsAppleMusicAppId(string? appId) =>
+        !string.IsNullOrWhiteSpace(appId) &&
+        (appId.Contains("AppleInc.AppleMusicWin", StringComparison.OrdinalIgnoreCase)
+         || appId.Contains("AppleMusic", StringComparison.OrdinalIgnoreCase));
+
+    internal static bool IsSpotifyAppId(string? appId)
+    {
+        if (string.IsNullOrWhiteSpace(appId)) return false;
         // Spotify 桌面客户端与 Microsoft Store 版的 AppId
         return appId.StartsWith("Spotify", StringComparison.OrdinalIgnoreCase)
                || appId.Contains("SpotifyAB.SpotifyMusic", StringComparison.OrdinalIgnoreCase);
@@ -76,10 +96,8 @@ public sealed class MediaSessionWatcher : IDisposable
 
     private void Attach(GlobalSystemMediaTransportControlsSession? session)
     {
-        // P0-D：session 过滤 —— 非 Spotify 播放器不当作当前曲目
-        var acceptable = session != null && (!SpotifyOnly || IsSpotifySession(session));
-        SetHasSpotifySession(acceptable);
-        if (!acceptable) session = null;
+        AppLog.Info("SMTC", $"attach source={session?.SourceAppUserModelId ?? "<none>"}");
+        SetHasMediaSession(session != null);
 
         if (_session != null)
         {
@@ -98,18 +116,21 @@ public sealed class MediaSessionWatcher : IDisposable
         _ = RefreshTrackAsync();
     }
 
-    private void SetHasSpotifySession(bool has)
+    private void SetHasMediaSession(bool has)
     {
-        if (HasSpotifySession == has) return;
-        HasSpotifySession = has;
-        SpotifySessionChanged?.Invoke(has);
+        if (HasMediaSession == has) return;
+        HasMediaSession = has;
+        MediaSessionAvailabilityChanged?.Invoke(has);
     }
 
     private void OnCurrentSessionChanged(GlobalSystemMediaTransportControlsSessionManager sender,
         CurrentSessionChangedEventArgs args)
     {
-        Attach(_manager?.GetCurrentSession());
+        Attach(SelectPreferredSession());
     }
+
+    private void OnSessionsChanged(GlobalSystemMediaTransportControlsSessionManager sender,
+        SessionsChangedEventArgs args) => Attach(SelectPreferredSession());
 
     private async void OnMediaPropertiesChanged(GlobalSystemMediaTransportControlsSession sender,
         MediaPropertiesChangedEventArgs args) => await RefreshTrackAsync();
@@ -132,14 +153,19 @@ public sealed class MediaSessionWatcher : IDisposable
 
             var timeline = _session.GetTimelineProperties();
             var playback = _session.GetPlaybackInfo();
+            var sourceAppId = _session.SourceAppUserModelId;
+            var rawAlbum = !string.IsNullOrWhiteSpace(props.AlbumTitle) ? props.AlbumTitle : props.AlbumArtist ?? "";
+            var normalized = IsAppleMusicAppId(sourceAppId)
+                ? AppleMusicMetadataNormalizer.Normalize(props.Artist, rawAlbum)
+                : (props.Artist?.Trim() ?? "", rawAlbum.Trim());
 
             var track = new MediaTrackInfo
             {
                 Title = props.Title ?? "",
-                Artist = props.Artist ?? "",
-                Album = props.AlbumArtist ?? props.AlbumTitle ?? "",
+                Artist = normalized.Item1,
+                Album = normalized.Item2,
                 Duration = timeline.EndTime,
-                AppId = _session.SourceAppUserModelId,
+                AppId = sourceAppId,
                 PositionMs = timeline.Position.TotalMilliseconds,
                 IsPlaying = playback?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
             };
@@ -164,13 +190,14 @@ public sealed class MediaSessionWatcher : IDisposable
                           || _lastTrack.Title != track.Title
                           || _lastTrack.Artist != track.Artist;
             _lastTrack = track;
+            AppLog.Info("SMTC", $"track title={track.Title}; artist={track.Artist}; album={track.Album}; playing={track.IsPlaying}; source={track.AppId}");
             if (changed) TrackChanged?.Invoke(track);
             PlaybackStateChanged?.Invoke(track.IsPlaying);
             PositionChanged?.Invoke(track.PositionMs);
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[LyricFever][SMTC] refresh track failed: {ex.Message}");
+            AppLog.Error("SMTC", ex);
         }
     }
 
@@ -231,6 +258,7 @@ public sealed class MediaSessionWatcher : IDisposable
         if (_manager != null)
         {
             _manager.CurrentSessionChanged -= OnCurrentSessionChanged;
+            _manager.SessionsChanged -= OnSessionsChanged;
             _manager = null;
         }
         if (_session != null)
@@ -241,4 +269,11 @@ public sealed class MediaSessionWatcher : IDisposable
             _session = null;
         }
     }
+}
+
+public enum MediaPlayerPreference
+{
+    AppleMusic,
+    Spotify,
+    Any
 }

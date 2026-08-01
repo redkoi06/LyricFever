@@ -9,11 +9,15 @@ namespace LyricFever.Windows.App.Services;
 /// </summary>
 public sealed class AppSettings
 {
+    private const int CurrentSettingsSchemaVersion = 1;
     private static readonly string SettingsPath =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "LyricFever", "settings.json");
 
     // ---- 播放器 ----
+    /// <summary>首选 SMTC 播放器：AppleMusic / Spotify / Any。</summary>
+    public string PreferredPlayer { get; set; } = "AppleMusic";
+    /// <summary>旧设置兼容字段；播放器选择改由 PreferredPlayer 驱动。</summary>
     public bool UseSpotify { get; set; } = true;
 
     // ---- 翻译 ----
@@ -27,8 +31,10 @@ public sealed class AppSettings
 
     // ---- K 歌窗口 ----
     public double KaraokeFontSize { get; set; } = 24;
-    public double KaraokeOpacity { get; set; } = 0.9;
+    public double KaraokeOpacity { get; set; } = 0.5;
     public bool KaraokeUseBackgroundColor { get; set; } = true;
+    public double? KaraokeLeft { get; set; }
+    public double? KaraokeTop { get; set; }
     /// <summary>歌词进度偏移（毫秒，正数提前显示）。</summary>
     public int LyricOffsetMs { get; set; }
 
@@ -38,10 +44,13 @@ public sealed class AppSettings
     // ---- 翻译产物缓存版本（模型升级时 +1 使旧缓存失效） ----
     public int TranslationModelVersion { get; set; } = 1;
     public int RomanizationVersion { get; set; } = 1;
+    public int SettingsSchemaVersion { get; set; } = CurrentSettingsSchemaVersion;
 
     private static AppSettings? _current;
 
     public static AppSettings Current => _current ??= Load();
+
+    public static event Action? SettingsChanged;
 
     public void Save()
     {
@@ -49,6 +58,7 @@ public sealed class AppSettings
         {
             Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
             File.WriteAllText(SettingsPath, JsonSerializer.Serialize(this, JsonOptions));
+            SettingsChanged?.Invoke();
         }
         catch (Exception ex)
         {
@@ -62,8 +72,23 @@ public sealed class AppSettings
         {
             if (File.Exists(SettingsPath))
             {
-                var loaded = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(SettingsPath), JsonOptions);
-                if (loaded != null) return loaded;
+                var json = File.ReadAllText(SettingsPath);
+                using var document = JsonDocument.Parse(json);
+                var hasSchemaVersion = document.RootElement.TryGetProperty(nameof(SettingsSchemaVersion), out _);
+                var loaded = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions);
+                if (loaded != null)
+                {
+                    // 早期 Windows 原型把悬浮窗默认透明度设为 90%，且固定只监听 Spotify。
+                    // 首次升级到可用版本时迁移到 macOS 原版的 50% 和 Apple Music 默认值。
+                    if (!hasSchemaVersion || loaded.SettingsSchemaVersion < CurrentSettingsSchemaVersion)
+                    {
+                        loaded.KaraokeOpacity = 0.5;
+                        loaded.PreferredPlayer = "AppleMusic";
+                        loaded.SettingsSchemaVersion = CurrentSettingsSchemaVersion;
+                        loaded.Save();
+                    }
+                    return loaded;
+                }
             }
         }
         catch (Exception ex)

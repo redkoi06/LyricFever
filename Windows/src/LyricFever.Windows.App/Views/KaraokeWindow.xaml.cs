@@ -1,9 +1,6 @@
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Threading;
-using LyricFever.Core.Lyrics;
 using LyricFever.Windows.App.Services;
 using LyricFever.Windows.App.ViewModels;
 
@@ -11,7 +8,8 @@ namespace LyricFever.Windows.App.Views;
 
 /// <summary>
 /// K 歌悬浮窗（对应 macOS FloatingPanel + KaraokeView）：
-/// 无边框透明置顶 + WS_EX_NOACTIVATE（点击不抢焦点）+ 手动拖动，三层歌词逐行高亮。
+/// 无边框透明置顶 + WS_EX_NOACTIVATE（点击不抢焦点）+ 手动拖动。
+/// 与 Swift KaraokeView 一致，仅显示当前一句、可选罗马音/翻译；没有可显示歌词时显示音符。
 /// </summary>
 public partial class KaraokeWindow : Window
 {
@@ -23,27 +21,32 @@ public partial class KaraokeWindow : Window
     private Point _dragStart;
     private Point _windowStart;
 
-    // 歌词行 UI 模型（三层排版）
-    private sealed record LyricRowView(
-        string Line, string Romanized, string Translated,
-        Visibility RomanizedVisibility, Visibility TranslatedVisibility);
-
     public KaraokeWindow(MainViewModel viewModel)
     {
         InitializeComponent();
         _viewModel = viewModel;
 
-        // 无边框透明窗口不抢焦点（对应 NSPanel .nonactivatingPanel）
-        SourceInitialized += (_, _) => ApplyNoActivateStyle();
+        // 正常运行不抢焦点；视觉检查模式保留可定位窗口，便于自动截图验收。
+        if (App.CurrentApp.IsVisualInspectionMode)
+        {
+            ShowInTaskbar = true;
+            ShowActivated = true;
+        }
+        else
+        {
+            SourceInitialized += (_, _) => ApplyNoActivateStyle();
+        }
 
         _viewModel.LyricsStateChanged += OnLyricsStateChanged;
         _viewModel.IndexChanged += OnIndexChanged;
         _viewModel.BackgroundColorChanged += OnBackgroundColorChanged;
+        AppSettings.SettingsChanged += OnSettingsChanged;
         Closed += (_, _) =>
         {
             _viewModel.LyricsStateChanged -= OnLyricsStateChanged;
             _viewModel.IndexChanged -= OnIndexChanged;
             _viewModel.BackgroundColorChanged -= OnBackgroundColorChanged;
+            AppSettings.SettingsChanged -= OnSettingsChanged;
         };
     }
 
@@ -56,102 +59,81 @@ public partial class KaraokeWindow : Window
 
     // ---- 歌词渲染 ----
 
-    private void OnLyricsStateChanged()
+    private void OnLyricsStateChanged() => Dispatcher.Invoke(RenderCurrentLyric);
+
+    private void OnIndexChanged() => Dispatcher.Invoke(RenderCurrentLyric);
+
+    private void OnSettingsChanged()
     {
         Dispatcher.Invoke(() =>
         {
-            var lyrics = _viewModel.CurrentlyPlayingLyrics;
-            var translated = _viewModel.TranslatedLyrics;
-            var romanized = _viewModel.RomanizedLyrics;
-            var showTranslation = AppSettings.Current.TranslateEnabled;
-            var showRomanization = AppSettings.Current.RomanizationEnabled;
-
-            if (lyrics == null || lyrics.Count == 0)
-            {
-                LyricsList.ItemsSource = new List<LyricRowView>
-                {
-                    new("♫", "", "", Visibility.Visible, Visibility.Collapsed)
-                };
-                return;
-            }
-
-            var rows = new List<LyricRowView>(lyrics.Count);
-            for (var i = 0; i < lyrics.Count; i++)
-            {
-                var line = lyrics[i];
-                var isPlaceholder = string.IsNullOrWhiteSpace(line.Words);
-                rows.Add(new LyricRowView(
-                    isPlaceholder ? "♫" : line.Words,
-                    SafeAt(romanized, i),
-                    SafeAt(translated, i),
-                    showRomanization && !isPlaceholder ? Visibility.Visible : Visibility.Collapsed,
-                    showTranslation && !isPlaceholder ? Visibility.Visible : Visibility.Collapsed));
-            }
-            LyricsList.ItemsSource = rows;
-            UpdateHighlight();
+            RenderCurrentLyric();
+            ApplyBackground(_viewModel.BackgroundColor);
         });
     }
 
-    private static string SafeAt(List<string> list, int index) =>
-        index >= 0 && index < list.Count ? list[index] : "";
-
-    private void OnIndexChanged() => Dispatcher.Invoke(UpdateHighlight);
-
-    private void UpdateHighlight()
+    private void RenderCurrentLyric()
     {
         var index = _viewModel.CurrentlyPlayingLyricsIndex;
-        var fontSize = AppSettings.Current.KaraokeFontSize;
+        var lyrics = _viewModel.CurrentlyPlayingLyrics;
+        var indexValue = index.GetValueOrDefault(-1);
+        var primary = indexValue >= 0 && lyrics != null && indexValue < lyrics.Count
+            ? DisplayableLyric(lyrics[indexValue].Words)
+            : null;
 
-        for (var i = 0; i < LyricsList.Items.Count; i++)
+        if (primary == null)
         {
-            var container = LyricsList.ItemContainerGenerator.ContainerFromIndex(i);
-            var panel = FindVisualChild<StackPanel>(container as DependencyObject);
-            var main = panel?.Children.OfType<TextBlock>().FirstOrDefault();
-            if (main == null) continue;
-
-            var isCurrent = i == index;
-            main.FontSize = isCurrent ? fontSize + 4 : fontSize - 2;
-            main.FontWeight = isCurrent ? FontWeights.Bold : FontWeights.Normal;
-            main.Foreground = new SolidColorBrush(Color.FromArgb(
-                (byte)(isCurrent ? 255 : 150), 255, 255, 255));
+            PlaceholderNote.Visibility = Visibility.Visible;
+            LyricContent.Visibility = Visibility.Collapsed;
+            return;
         }
 
-        // 滚动到当前行（居中）
-        if (index is >= 0 && index < LyricsList.Items.Count)
-        {
-            var container = LyricsList.ItemContainerGenerator.ContainerFromIndex(index.Value);
-            if (container is FrameworkElement fe)
-            {
-                fe.BringIntoView(new Rect(0, fe.RenderSize.Height * 0.4, 0, fe.RenderSize.Height * 0.6));
-            }
-        }
+        var fontSize = Math.Clamp(AppSettings.Current.KaraokeFontSize, 12, 48);
+        var romanized = AppSettings.Current.RomanizationEnabled
+            ? DisplayableLyric(SafeAt(_viewModel.RomanizedLyrics, indexValue))
+            : null;
+        var translated = AppSettings.Current.TranslateEnabled
+            ? DisplayableLyric(SafeAt(_viewModel.TranslatedLyrics, indexValue))
+            : null;
+
+        if (string.Equals(primary, translated, StringComparison.OrdinalIgnoreCase))
+            translated = null;
+
+        PrimaryLine.Text = primary;
+        PrimaryLine.FontSize = fontSize;
+        RomanizedLine.Text = romanized ?? "";
+        RomanizedLine.FontSize = fontSize * 0.70;
+        RomanizedLine.Visibility = romanized == null ? Visibility.Collapsed : Visibility.Visible;
+        TranslatedLine.Text = translated ?? "";
+        TranslatedLine.FontSize = fontSize * 0.82;
+        TranslatedLine.Visibility = translated == null ? Visibility.Collapsed : Visibility.Visible;
+
+        PlaceholderNote.Visibility = Visibility.Collapsed;
+        LyricContent.Visibility = Visibility.Visible;
     }
 
-    private static T? FindVisualChild<T>(DependencyObject? parent) where T : DependencyObject
+    private static string? DisplayableLyric(string? value)
     {
-        if (parent == null) return null;
-        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
-        {
-            var child = VisualTreeHelper.GetChild(parent, i);
-            if (child is T typed) return typed;
-            var found = FindVisualChild<T>(child);
-            if (found != null) return found;
-        }
-        return null;
+        var trimmed = value?.Trim();
+        if (string.IsNullOrEmpty(trimmed)) return null;
+        return trimmed.All(ch => char.IsWhiteSpace(ch) || "♪♫♩♬".Contains(ch)) ? null : trimmed;
     }
+
+    private static string SafeAt(IReadOnlyList<string> list, int index) =>
+        index >= 0 && index < list.Count ? list[index] : "";
 
     // ---- 背景色 ----
 
-    private void OnBackgroundColorChanged(Color color)
+    private void OnBackgroundColorChanged(Color color) => Dispatcher.Invoke(() => ApplyBackground(color));
+
+    private void ApplyBackground(Color color)
     {
-        Dispatcher.Invoke(() =>
-        {
-            var opacity = AppSettings.Current.KaraokeOpacity;
-            var brush = AppSettings.Current.KaraokeUseBackgroundColor
-                ? new SolidColorBrush(Color.FromArgb((byte)(255 * opacity), color.R, color.G, color.B))
-                : new SolidColorBrush(Color.FromArgb((byte)(255 * opacity), 20, 20, 26));
-            RootBorder.Background = brush;
-        });
+        var opacity = Math.Clamp(AppSettings.Current.KaraokeOpacity, 0.05, 1.0);
+        var baseColor = AppSettings.Current.KaraokeUseBackgroundColor
+            ? color
+            : Color.FromRgb(45, 60, 204);
+        AlbumTint.Background = new SolidColorBrush(Color.FromArgb(
+            (byte)Math.Round(255 * opacity), baseColor.R, baseColor.G, baseColor.B));
     }
 
     // ---- 拖动（NOACTIVATE 窗口不能用 DragMove，手动实现） ----
@@ -180,6 +162,9 @@ public partial class KaraokeWindow : Window
         _dragging = false;
         ReleaseMouseCapture();
         SnapToScreenEdge();
+        AppSettings.Current.KaraokeLeft = Left;
+        AppSettings.Current.KaraokeTop = Top;
+        AppSettings.Current.Save();
     }
 
     /// <summary>边缘吸附（对应 macOS FloatingPanel 的吸附逻辑简化版）。</summary>
@@ -208,8 +193,28 @@ public partial class KaraokeWindow : Window
 
     private void OnRootLoaded(object sender, RoutedEventArgs e)
     {
-        OnLyricsStateChanged();
-        OnBackgroundColorChanged(_viewModel.BackgroundColor);
+        RestorePosition();
+        RenderCurrentLyric();
+        ApplyBackground(_viewModel.BackgroundColor);
+    }
+
+    private void RestorePosition()
+    {
+        var workArea = SystemParameters.WorkArea;
+        var savedLeft = AppSettings.Current.KaraokeLeft;
+        var savedTop = AppSettings.Current.KaraokeTop;
+
+        if (savedLeft.HasValue && savedTop.HasValue &&
+            savedLeft.Value < workArea.Right - 40 && savedLeft.Value + Width > workArea.Left + 40 &&
+            savedTop.Value < workArea.Bottom - 40 && savedTop.Value + Height > workArea.Top + 40)
+        {
+            Left = savedLeft.Value;
+            Top = savedTop.Value;
+            return;
+        }
+
+        Left = workArea.Right - Width - 48;
+        Top = workArea.Top + 48;
     }
 
     // ---- P/Invoke ----

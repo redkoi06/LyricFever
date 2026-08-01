@@ -23,9 +23,21 @@
             <!-- 播放器 -->
             <TabItem Header="播放器">
                 <StackPanel Margin="12">
-                    <CheckBox IsChecked="{Binding UseSpotify}" Content="使用 Spotify 集成（SMTC）"/>
+                    <TextBlock Text="播放来源：" Style="{StaticResource SettingLabel}"/>
+                    <ComboBox Width="220" HorizontalAlignment="Left"
+                              SelectedValue="{Binding PreferredPlayer}"
+                              SelectedValuePath="Tag">
+                        <ComboBoxItem Content="Apple Music" Tag="AppleMusic"/>
+                        <ComboBoxItem Content="Spotify" Tag="Spotify"/>
+                        <ComboBoxItem Content="系统当前播放器" Tag="Any"/>
+                    </ComboBox>
+                    <TextBlock x:Name="MediaSessionStatusText" Text="播放器状态：未检测到"
+                               Style="{StaticResource SettingLabel}"/>
+                    <Separator Margin="0,8"/>
                     <TextBlock x:Name="SpotifyStatusText" Text="Spotify 登录状态：未登录"
                                Style="{StaticResource SettingLabel}"/>
+                    <TextBlock Text="Apple Music 仅提供播放元数据；歌词仍按缓存、Spotify、LRCLIB、网易云顺序查找。"
+                               TextWrapping="Wrap" Foreground="Gray" FontSize="12"/>
                 </StackPanel>
             </TabItem>
 

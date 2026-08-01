@@ -8,7 +8,7 @@ namespace LyricFever.Windows.App.Views;
 
 /// <summary>
 /// 设置窗口（对应 macOS 版 OnboardingWindow 的 5 Tab 结构，按 Windows 范围精简为 4 Tab）。
-/// 每个可见控件都接线：保存时应用运行时行为（UseSpotify → watcher 过滤、LaunchAtStartup → 注册表）。
+/// 每个可见控件都接线：保存时应用运行时行为（播放器选择、LaunchAtStartup → 注册表）。
 /// </summary>
 public partial class SettingsWindow : Window
 {
@@ -21,6 +21,7 @@ public partial class SettingsWindow : Window
         _viewModel = App.CurrentApp.MainViewModel
             ?? throw new InvalidOperationException("MainViewModel 未初始化");
         UpdateSpotifyStatus(_viewModel.IsSpotifyLoggedIn);
+        UpdateMediaSessionStatus();
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         Closed += (_, _) => _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
     }
@@ -29,6 +30,21 @@ public partial class SettingsWindow : Window
     {
         if (e.PropertyName == nameof(MainViewModel.IsSpotifyLoggedIn))
             Dispatcher.InvokeAsync(() => UpdateSpotifyStatus(_viewModel.IsSpotifyLoggedIn));
+        else if (e.PropertyName == nameof(MainViewModel.HasMediaSession))
+            Dispatcher.InvokeAsync(UpdateMediaSessionStatus);
+    }
+
+    private void UpdateMediaSessionStatus()
+    {
+        var player = AppSettings.Current.PreferredPlayer switch
+        {
+            "Spotify" => "Spotify",
+            "Any" => "系统当前播放器",
+            _ => "Apple Music"
+        };
+        MediaSessionStatusText.Text = _viewModel.HasMediaSession
+            ? $"播放器状态：已连接 {player}"
+            : $"播放器状态：未检测到 {player}";
     }
 
     private void UpdateSpotifyStatus(bool loggedIn)
@@ -41,11 +57,11 @@ public partial class SettingsWindow : Window
         var settings = AppSettings.Current;
         settings.Save();
 
-        // 应用运行时设置（UseSpotify 立即生效，无需重启）
+        // 应用运行时设置（播放器选择立即生效，无需重启）
         var app = App.CurrentApp;
         if (app.Watcher != null)
         {
-            app.Watcher.SpotifyOnly = settings.UseSpotify;
+            app.Watcher.PreferredPlayer = App.ParsePlayerPreference(settings.PreferredPlayer);
             app.Watcher.ApplySessionFilter();
         }
         ApplyLaunchAtStartup(settings.LaunchAtStartup);

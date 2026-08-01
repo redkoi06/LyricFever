@@ -10,11 +10,22 @@
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | P0 | 环境 + 解决方案骨架 + 托盘 + 设置窗口 | ✅ 完成（Release 0 错误 0 警告） |
-| P1 | 歌词引擎（LRC 解析、匹配、同步、Provider、SQLite 缓存、语言检测） | ✅ 完成（43/43 单元测试通过） |
-| P2 | Spotify 集成（SMTC、track 映射、DPAPI、WebView2 登录、主流程 ViewModel） | ⚠️ 代码完成 + P0-D 修复完成；真实 Spotify E2E 未验收 |
-| P3 | K 歌悬浮窗（置顶透明 NOACTIVATE、拖动吸附、三层歌词高亮、封面色） | ⚠️ 代码完成；人工视觉/多显示器验收未做 |
-| P4 | 翻译/罗马音管线 | ⚠️ 管线集成探针全部通过（缓存 4ms/取消/空行/换模型）；真实 Spotify 播放 E2E 未验收 |
-| P5 | 打包发布 | ✅ 安装包已产出并验证安装/启动/卸载闭环；清洁环境首次部署验证通过 |
+| P1 | 歌词引擎（LRC 解析、匹配、同步、Provider、SQLite 缓存、语言检测） | ✅ 完成（46/46 单元测试通过） |
+| P2 | Apple Music / Spotify 集成（SMTC、track 映射、DPAPI、WebView2 登录、主流程 ViewModel） | ⚠️ Apple Music 真实 E2E 已通过；Spotify 真实 E2E 仍未验收 |
+| P3 | K 歌悬浮窗（置顶透明 NOACTIVATE、拖动吸附、当前歌词/音符占位、封面色） | ⚠️ 单显示器视觉验收通过；多显示器验收未做 |
+| P4 | 翻译/罗马音管线 | ⚠️ Apple Music 真实日文歌词、罗马音和翻译 E2E 已通过；Spotify E2E 未验收 |
+| P5 | 打包发布 | ✅ 431 MB portable 与 204,303,030 字节安装包已重新生成；安装/启动/单实例验证通过 |
+
+---
+
+## 2026-08-01 可用性与视觉复核
+
+- 修复重复托盘/重复进程：命名互斥量保证单实例，第二次启动只唤醒已有歌词窗；安装版实测连续启动两次仍为 1 个进程。
+- 播放来源改为 `AppleMusic` / `Spotify` / `Any` 可配置，默认 Apple Music；本机实际 AUMID `AppleInc.AppleMusicWin_nzyj5cx40ttqa!App` 已识别。
+- Apple Music SMTC 会把 Artist/Album 合并为 `歌手 — 专辑`；现已仅在 Apple Music 路径拆分，`glory days (Movie Version) / Luna Haruna` 从 0 行恢复为 48 行，自动切歌到 `コイセカイ / ClariS` 获取 87 行。
+- K 歌窗已对齐 Swift `KaraokeView`：`800×130`、当前一句、0.7 倍罗马音、0.82 倍翻译、无可显示歌词时单音符、16 px 圆角、50% 专辑色叠加暗色 HUD、右上角默认位置与拖动位置保存。
+- 新增非敏感运行日志 `%APPDATA%\LyricFever\logs\app.log`，记录启动、SMTC 会话、规范化元数据、歌词行数与异常，不记录 cookie/token。
+- `dotnet test` 46/46，Release 0 错误 0 警告，`git diff --check` 通过。
 
 ---
 

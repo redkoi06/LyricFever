@@ -50,7 +50,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _watcher.TrackChanged += OnTrackChanged;
         _watcher.PositionChanged += OnPositionChanged;
         _watcher.PlaybackStateChanged += OnPlaybackStateChanged;
-        _watcher.SpotifySessionChanged += OnSpotifySessionChanged;
+        _watcher.MediaSessionAvailabilityChanged += OnMediaSessionAvailabilityChanged;
     }
 
     // ---- 对外状态 ----
@@ -69,6 +69,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public string CurrentAlbum { get; private set; } = "";
     public bool IsFetching { get; private set; }
     public bool IsSpotifyLoggedIn { get; private set; }
+    public bool HasMediaSession { get; private set; }
     public bool IsPlaying { get; private set; }
 
     /// <summary>索引变化（K 歌窗口驱动高亮）。</summary>
@@ -116,6 +117,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private void OnTrackChanged(MediaTrackInfo track)
     {
+        AppLog.Info("VM", $"track event title={track.Title}; artist={track.Artist}; source={track.AppId}");
         if (string.IsNullOrEmpty(track.Title)) return;
         // 同曲目跳过（SMTC 重复通知）
         if (_currentTrackId != null && _lastPositionMs >= 0 &&
@@ -150,9 +152,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         Raise(nameof(IsPlaying));
     }
 
-    /// <summary>可接受 session 消失（如 Spotify 退出或切到其他播放器）：清空当前曲目状态。</summary>
-    private void OnSpotifySessionChanged(bool hasSession)
+    /// <summary>首选播放器 session 消失时清空曲目状态。</summary>
+    private void OnMediaSessionAvailabilityChanged(bool hasSession)
     {
+        HasMediaSession = hasSession;
+        Raise(nameof(HasMediaSession));
         if (hasSession) return;
         CancelCurrentWork();
         ResetLyricsState();
@@ -210,6 +214,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 string.IsNullOrEmpty(track.Album) ? null : track.Album, token);
             token.ThrowIfCancellationRequested();
             if (version != _taskVersion) return;
+            AppLog.Info("VM", $"lyrics fetched trackId={trackId}; count={result.Lyrics.Count}");
 
             // 3. 装载同步引擎（空歌词也装载：显示空状态而非旧歌词）
             _currentTrackId = trackId;
@@ -230,7 +235,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[LyricFever][VM] track change failed: {ex.Message}");
+            AppLog.Error("VM", ex);
         }
         finally
         {
@@ -323,7 +328,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _watcher.TrackChanged -= OnTrackChanged;
         _watcher.PositionChanged -= OnPositionChanged;
         _watcher.PlaybackStateChanged -= OnPlaybackStateChanged;
-        _watcher.SpotifySessionChanged -= OnSpotifySessionChanged;
+        _watcher.MediaSessionAvailabilityChanged -= OnMediaSessionAvailabilityChanged;
         CancelCurrentWork();
     }
 
