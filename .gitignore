@@ -92,3 +92,7 @@ fastlane/test_output
 
 iOSInjectionProject/
 Lyric Fever.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+
+# .NET build outputs
+Windows/**/bin/
+Windows/**/obj/
