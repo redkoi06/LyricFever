@@ -2,17 +2,26 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using Hardcodet.Wpf.TaskbarNotification;
+using LyricFever.Windows.App.ViewModels;
 using LyricFever.Windows.App.Views;
 
 namespace LyricFever.Windows.App.Services;
 
 /// <summary>
-/// 系统托盘：左键单击开关设置窗口（P3 后改为 K 歌窗口），右键菜单提供设置/退出。
+/// 系统托盘：左键单击开关 K 歌窗口（P3），右键菜单提供播放控制/登录/设置/退出。
 /// </summary>
 public sealed class TrayIconService : IDisposable
 {
+    private readonly MainViewModel _viewModel;
     private TaskbarIcon? _trayIcon;
     private SettingsWindow? _settingsWindow;
+    private SpotifyLoginWindow? _loginWindow;
+    private KaraokeWindow? _karaokeWindow;
+
+    public TrayIconService(MainViewModel viewModel)
+    {
+        _viewModel = viewModel;
+    }
 
     public void Initialize()
     {
@@ -22,15 +31,28 @@ public sealed class TrayIconService : IDisposable
             ToolTipText = "Lyric Fever",
             ContextMenu = CreateContextMenu()
         };
-        _trayIcon.TrayLeftMouseUp += OnTrayLeftClick;
+        _trayIcon.TrayLeftMouseUp += (_, _) => ToggleLyricsWindow();
     }
 
-    private void OnTrayLeftClick(object sender, RoutedEventArgs e)
+    private void ToggleLyricsWindow()
     {
-        ToggleSettingsWindow();
+        if (_karaokeWindow == null)
+        {
+            _karaokeWindow = new KaraokeWindow(_viewModel);
+            _karaokeWindow.Closed += (_, _) => _karaokeWindow = null;
+        }
+
+        if (_karaokeWindow.IsVisible)
+        {
+            _karaokeWindow.Hide();
+        }
+        else
+        {
+            _karaokeWindow.Show();
+        }
     }
 
-    public void ToggleSettingsWindow()
+    private void ToggleSettingsWindow()
     {
         if (_settingsWindow == null)
         {
@@ -49,13 +71,48 @@ public sealed class TrayIconService : IDisposable
         }
     }
 
+    private void ShowLoginWindow()
+    {
+        if (_loginWindow == null)
+        {
+            _loginWindow = new SpotifyLoginWindow();
+            _loginWindow.Closed += (_, _) => _loginWindow = null;
+        }
+        _loginWindow.Show();
+        _loginWindow.Activate();
+    }
+
     private ContextMenu CreateContextMenu()
     {
         var menu = new ContextMenu();
 
-        var showLyrics = new MenuItem { Header = "显示歌词窗口" };
-        showLyrics.Click += (_, _) => ShowLyricsWindow();
-        menu.Items.Add(showLyrics);
+        var lyrics = new MenuItem { Header = "显示歌词窗口" };
+        lyrics.Click += (_, _) => ToggleLyricsWindow();
+        menu.Items.Add(lyrics);
+
+        menu.Items.Add(new Separator());
+
+        var playPause = new MenuItem { Header = "播放 / 暂停" };
+        playPause.Click += async (_, _) => await _viewModel.PlayPauseAsync();
+        menu.Items.Add(playPause);
+
+        var prev = new MenuItem { Header = "上一首" };
+        prev.Click += async (_, _) => await _viewModel.PreviousAsync();
+        menu.Items.Add(prev);
+
+        var next = new MenuItem { Header = "下一首" };
+        next.Click += async (_, _) => await _viewModel.NextAsync();
+        menu.Items.Add(next);
+
+        var refresh = new MenuItem { Header = "刷新歌词" };
+        refresh.Click += (_, _) => _viewModel.RefreshLyrics();
+        menu.Items.Add(refresh);
+
+        menu.Items.Add(new Separator());
+
+        var login = new MenuItem { Header = "Spotify 登录" };
+        login.Click += (_, _) => ShowLoginWindow();
+        menu.Items.Add(login);
 
         var settings = new MenuItem { Header = "设置" };
         settings.Click += (_, _) => ToggleSettingsWindow();
@@ -70,12 +127,6 @@ public sealed class TrayIconService : IDisposable
         return menu;
     }
 
-    /// <summary>P3 实现：K 歌悬浮窗开关。先作为占位。</summary>
-    private void ShowLyricsWindow()
-    {
-        ToggleSettingsWindow();
-    }
-
     private static ImageSource CreateIcon()
     {
         // 简易音符图标（白色音符 + 深色底），避免依赖 .ico 资源文件
@@ -88,11 +139,11 @@ public sealed class TrayIconService : IDisposable
         drawing.Children.Add(bg);
 
         var note = new GeometryGroup();
-        note.Children.Add(new EllipseGeometry(new Point(6, 14), 2.6, 2.6)); // 符头
+        note.Children.Add(new EllipseGeometry(new Point(6, 14), 2.6, 2.6));
         note.Children.Add(new EllipseGeometry(new Point(12.5, 10), 2.6, 2.6));
-        note.Children.Add(new RectangleGeometry(new Rect(8.3, 4.2, 1.4, 9.2))); // 右符杆
-        note.Children.Add(new RectangleGeometry(new Rect(1.9, 8.2, 1.4, 9.2))); // 左符杆
-        note.Children.Add(new LineGeometry(new Point(3.3, 8.2), new Point(9.7, 7.0))); // 横梁
+        note.Children.Add(new RectangleGeometry(new Rect(8.3, 4.2, 1.4, 9.2)));
+        note.Children.Add(new RectangleGeometry(new Rect(1.9, 8.2, 1.4, 9.2)));
+        note.Children.Add(new LineGeometry(new Point(3.3, 8.2), new Point(9.7, 7.0)));
         var noteDrawing = new GeometryDrawing
         {
             Brush = Brushes.White,

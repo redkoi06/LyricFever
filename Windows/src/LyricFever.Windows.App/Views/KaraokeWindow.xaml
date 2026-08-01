@@ -1,0 +1,49 @@
+<Window x:Class="LyricFever.Windows.App.Views.KaraokeWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Lyric Fever 歌词"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ShowActivated="False"
+        ResizeMode="NoResize"
+        Width="520" Height="340"
+        WindowStartupLocation="CenterScreen">
+    <Border x:Name="RootBorder" CornerRadius="18" BorderThickness="1"
+            MouseLeftButtonDown="OnBorderMouseDown"
+            MouseLeftButtonUp="OnBorderMouseUp"
+            MouseMove="OnBorderMouseMove"
+            Loaded="OnRootLoaded">
+        <Border.ContextMenu>
+            <ContextMenu>
+                <MenuItem Header="隐藏歌词窗口" Click="OnHideClicked"/>
+                <MenuItem Header="设置" Click="OnSettingsClicked"/>
+                <MenuItem Header="退出" Click="OnQuitClicked"/>
+            </ContextMenu>
+        </Border.ContextMenu>
+        <ScrollViewer x:Name="Scroller"
+                      VerticalScrollBarVisibility="Hidden"
+                      HorizontalScrollBarVisibility="Disabled"
+                      Padding="28,18">
+            <ItemsControl x:Name="LyricsList">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel x:Name="RowPanel" Margin="0,7">
+                            <TextBlock x:Name="MainLine" Text="{Binding Line}"
+                                       FontSize="{Binding FontSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                                       FontWeight="Normal" TextWrapping="Wrap" Foreground="#CCFFFFFF"/>
+                            <TextBlock x:Name="RomajiLine" Text="{Binding Romanized}"
+                                       FontSize="13" Foreground="#88FFFFFF" TextWrapping="Wrap"
+                                       Visibility="{Binding RomanizedVisibility}"/>
+                            <TextBlock x:Name="TranslatedLine" Text="{Binding Translated}"
+                                       FontSize="14" Foreground="#99FFFFFF" TextWrapping="Wrap"
+                                       Visibility="{Binding TranslatedVisibility}"/>
+                        </StackPanel>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+    </Border>
+</Window>

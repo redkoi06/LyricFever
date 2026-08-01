@@ -183,6 +183,95 @@ public sealed class SpotifyLyricProvider : ILyricProvider
     }
 
     // ------------------------------------------------------------------
+    // Track search（SMTC 不给 Spotify URI，需按 歌手+歌名 搜索 track ID）
+    // 对应 macOS searchForTrackForAppleMusic 的 GraphQL searchDesktop 路径。
+    // ------------------------------------------------------------------
+
+    public async Task<SpotifyTrackInfo?> SearchSpotifyTrackAsync(
+        string searchTerm, CancellationToken cancellationToken = default)
+    {
+        await GenerateAccessTokenAsync(cancellationToken);
+        if (_accessToken == null)
+            throw new SpotifyLyricError(SpotifyLyricError.ErrorKind.InvalidResponse);
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "https://api-partner.spotify.com/pathfinder/v2/query");
+        request.Headers.Add("app-platform", "WebPlayer");
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _accessToken.AccessToken);
+
+        var body = new
+        {
+            variables = new
+            {
+                searchTerm,
+                offset = 0,
+                limit = 1,
+                numberOfTopResults = 1,
+                includeAudiobooks = false,
+                includeArtistHasConcertsField = false,
+                includePreReleases = false,
+                includeLocalConcertsField = false,
+                includeAuthors = false
+            },
+            operationName = "searchDesktop",
+            extensions = new
+            {
+                persistedQuery = new
+                {
+                    version = 1,
+                    sha256Hash = "d9f785900f0710b31c07818d617f4f7600c1e21217e80f5b043d1e78d74e6026"
+                }
+            }
+        };
+        request.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var data = await SendWithCheckAsync(request, cancellationToken);
+        return ParseSearchDesktopResult(data);
+    }
+
+    /// <summary>解析 searchDesktop GraphQL 响应中的首个曲目（对应 macOS getDetailsFromSpotifyInternalSearchJSON）。</summary>
+    internal static SpotifyTrackInfo? ParseSearchDesktopResult(byte[] data)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(data);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("data", out var dataObj)) return null;
+            if (!dataObj.TryGetProperty("searchV2", out var searchV2)) return null;
+            if (!searchV2.TryGetProperty("tracksV2", out var tracksV2)) return null;
+            if (!tracksV2.TryGetProperty("items", out var items) || items.GetArrayLength() == 0) return null;
+
+            var firstItem = items[0];
+            if (!firstItem.TryGetProperty("item", out var item)) return null;
+            if (!item.TryGetProperty("data", out var trackData)) return null;
+
+            var name = trackData.TryGetProperty("name", out var nameProp) ? nameProp.GetString() : null;
+            var id = trackData.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
+
+            string? album = null;
+            if (trackData.TryGetProperty("albumOfTrack", out var albumObj) &&
+                albumObj.TryGetProperty("name", out var albumName))
+                album = albumName.GetString();
+
+            string? artist = null;
+            if (trackData.TryGetProperty("artists", out var artists) &&
+                artists.TryGetProperty("items", out var artistItems) &&
+                artistItems.GetArrayLength() > 0 &&
+                artistItems[0].TryGetProperty("profile", out var profile) &&
+                profile.TryGetProperty("name", out var artistName))
+                artist = artistName.GetString();
+
+            if (id == null || name == null) return null;
+
+            return new SpotifyTrackInfo(id, name, artist ?? "", album ?? "");
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    // ------------------------------------------------------------------
     // HTTP helpers
     // ------------------------------------------------------------------
 

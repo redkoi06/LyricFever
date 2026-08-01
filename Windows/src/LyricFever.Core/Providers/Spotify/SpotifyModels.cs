@@ -87,6 +87,9 @@ public sealed class ErrorWrapper
     }
 }
 
+/// <summary>GraphQL 搜索到的 Spotify 曲目（对应 macOS AppleMusicHelper）。</summary>
+public sealed record SpotifyTrackInfo(string TrackId, string Name, string Artist, string Album);
+
 public sealed class SpotifyLyricError : Exception
 {
     public enum ErrorKind
