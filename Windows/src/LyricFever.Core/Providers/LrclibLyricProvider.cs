@@ -18,7 +18,7 @@ public sealed class LrclibLyricProvider : ILyricProvider
     private static HttpClient CreateClient()
     {
         var handler = new HttpClientHandler { AutomaticDecompression = System.Net.DecompressionMethods.All };
-        var client = new HttpClient(handler);
+        var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("Lyric Fever v3.3");
         return client;
     }

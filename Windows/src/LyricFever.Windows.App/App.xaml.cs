@@ -3,6 +3,7 @@ using LyricFever.Core.Providers;
 using LyricFever.Core.Providers.Spotify;
 using LyricFever.Core.Storage;
 using LyricFever.Windows.App.Services;
+using LyricFever.Windows.App.Services.Translation;
 using LyricFever.Windows.App.ViewModels;
 
 namespace LyricFever.Windows.App;
@@ -39,8 +40,12 @@ public partial class App : Application
         var fetchService = new LyricFetchService(LyricsRepository,
             new ILyricProvider[] { SpotifyProvider, new LrclibLyricProvider(), new NetEaseLyricProvider() });
         var watcher = new MediaSessionWatcher();
+        var translationPipeline = new TranslationPipelineService(
+            new CTranslate2TranslationProvider(),
+            new KawazuRomanizationProvider(),
+            TranslationCache);
 
-        MainViewModel = new MainViewModel(watcher, trackMapper, fetchService, LyricsRepository);
+        MainViewModel = new MainViewModel(watcher, trackMapper, fetchService, LyricsRepository, translationPipeline);
         _trayIcon = new TrayIconService(MainViewModel);
         _trayIcon.Initialize();
 

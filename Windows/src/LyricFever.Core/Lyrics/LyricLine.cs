@@ -22,7 +22,9 @@ public sealed class LyricLine
         get
         {
             // 与 macOS 版一致：无效时间戳视为解码错误，由调用方兜底
-            if (double.TryParse(StartTimeMs, out var ms) && !double.IsNaN(ms) && !double.IsInfinity(ms))
+            if (double.TryParse(StartTimeMs, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var ms) &&
+                !double.IsNaN(ms) && !double.IsInfinity(ms))
                 return ms;
             return double.NaN;
         }

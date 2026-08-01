@@ -85,14 +85,16 @@ public sealed class LyricsParser
 
     /// <summary>
     /// 时间戳解析（对应 macOS timestampMilliseconds）。支持 mm:ss / hh:mm:ss / mm:ss.xx。
+    /// 使用 InvariantCulture，避免用户区域设置影响小数解析。
     /// </summary>
     internal static double? TimestampMilliseconds(string value)
     {
         var components = value.Split(':');
         if (components.Length is < 2 or > 3) return null;
 
-        if (!double.TryParse(components[^1], out var seconds) ||
-            !double.TryParse(components[^2], out var minutes) ||
+        var style = System.Globalization.NumberStyles.Float;
+        if (!double.TryParse(components[^1], style, System.Globalization.CultureInfo.InvariantCulture, out var seconds) ||
+            !double.TryParse(components[^2], style, System.Globalization.CultureInfo.InvariantCulture, out var minutes) ||
             double.IsNaN(seconds) || double.IsInfinity(seconds) ||
             double.IsNaN(minutes) || double.IsInfinity(minutes) ||
             seconds < 0 || minutes < 0)
@@ -101,7 +103,7 @@ public sealed class LyricsParser
         double hours = 0;
         if (components.Length == 3)
         {
-            if (!double.TryParse(components[0], out hours) ||
+            if (!double.TryParse(components[0], style, System.Globalization.CultureInfo.InvariantCulture, out hours) ||
                 double.IsNaN(hours) || double.IsInfinity(hours) || hours < 0)
                 return null;
         }

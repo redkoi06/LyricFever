@@ -7,6 +7,7 @@ using LyricFever.Core.Providers;
 using LyricFever.Core.Providers.Spotify;
 using LyricFever.Core.Storage;
 using LyricFever.Windows.App.Services;
+using LyricFever.Windows.App.Services.Translation;
 
 namespace LyricFever.Windows.App.ViewModels;
 
@@ -14,34 +15,41 @@ namespace LyricFever.Windows.App.ViewModels;
 /// 主流程 ViewModel（对应 macOS ViewModel.swift 的歌词状态机）：
 /// SMTC 曲目事件 → track ID 映射 → 歌词获取（缓存→Provider 链）→ 同步引擎 → UI 事件。
 ///
-/// 移植自 AGENTS.md 沉淀的防崩溃/防竞态经验：
+/// 执行指挥书 P0-B 约定：
+/// - 每个曲目一个 CancellationTokenSource：切歌/刷新/退出统一取消旧任务
 /// - 歌词数组 + 索引 + 派生数组（译文/罗马音）作为一组状态，切歌整组重置
-/// - 异步结果返回时校验任务版本，旧歌曲结果不得覆盖新歌曲
+/// - 异步返回时同时校验任务版本与取消状态，旧歌曲结果不得覆盖新歌曲
 /// - 循环回绕（进度跳回开头）重置索引
 /// - 所有 UI 下标访问防御边界
 /// </summary>
-public sealed class MainViewModel : INotifyPropertyChanged
+public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly MediaSessionWatcher _watcher;
     private readonly SpotifyTrackMapper _trackMapper;
     private readonly LyricFetchService _fetchService;
     private readonly LyricsRepository _repo;
+    private readonly TranslationPipelineService _translationPipeline;
     private readonly LyricSyncEngine _sync = new();
 
     private string? _currentTrackId;
     private int _taskVersion;
     private double _lastPositionMs = -1;
+    private List<LyricLine>? _currentLyrics;
+    private CancellationTokenSource? _currentCts;
 
     public MainViewModel(MediaSessionWatcher watcher, SpotifyTrackMapper trackMapper,
-        LyricFetchService fetchService, LyricsRepository repo)
+        LyricFetchService fetchService, LyricsRepository repo,
+        TranslationPipelineService translationPipeline)
     {
         _watcher = watcher;
         _trackMapper = trackMapper;
         _fetchService = fetchService;
         _repo = repo;
+        _translationPipeline = translationPipeline;
 
         _watcher.TrackChanged += OnTrackChanged;
         _watcher.PositionChanged += OnPositionChanged;
+        _watcher.PlaybackStateChanged += OnPlaybackStateChanged;
     }
 
     // ---- 对外状态 ----
@@ -81,12 +89,26 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         // 恢复 sp_dc → 判定登录状态
         var cookie = CredentialStore.Get("spotify.sp_dc");
-        if (!string.IsNullOrEmpty(cookie))
-        {
-            IsSpotifyLoggedIn = true;
-            Raise(nameof(IsSpotifyLoggedIn));
-        }
+        SetSpotifyLoggedIn(!string.IsNullOrEmpty(cookie));
         await _watcher.StartAsync();
+    }
+
+    /// <summary>登录状态回调（登录窗口成功后注入，无需重启）。</summary>
+    public void OnSpotifyLoggedIn(string? spDcCookie)
+    {
+        SetSpotifyLoggedIn(!string.IsNullOrEmpty(spDcCookie));
+        // 注入运行中的 Provider（立即生效）
+        var app = System.Windows.Application.Current as App;
+        if (app != null) app.SpotifyProvider.SpDcCookie = spDcCookie;
+        // 清除可能失效的旧 token
+        _ = Task.Run(() => app?.SpotifyProvider.ClearAccessToken());
+    }
+
+    private void SetSpotifyLoggedIn(bool loggedIn)
+    {
+        if (IsSpotifyLoggedIn == loggedIn) return;
+        IsSpotifyLoggedIn = loggedIn;
+        Raise(nameof(IsSpotifyLoggedIn));
     }
 
     // ---- 曲目事件 ----
@@ -120,17 +142,26 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    // ---- 切歌流程 ----
+    private void OnPlaybackStateChanged(bool isPlaying)
+    {
+        if (IsPlaying == isPlaying) return;
+        IsPlaying = isPlaying;
+        Raise(nameof(IsPlaying));
+    }
+
+    // ---- 切歌/刷新统一流程 ----
 
     private async Task HandleTrackChangeAsync(MediaTrackInfo track)
     {
+        // 取消上一曲目的所有在途任务
+        CancelCurrentWork();
+        var cts = new CancellationTokenSource();
+        _currentCts = cts;
+        var token = cts.Token;
         var version = ++_taskVersion;
 
         // 整组状态重置（歌词/索引/译文/罗马音）
-        _sync.Lyrics = null;
-        TranslatedLyrics = new List<string>();
-        RomanizedLyrics = new List<string>();
-        _currentTrackId = null;
+        ResetLyricsState();
         CurrentTitle = track.Title;
         CurrentArtist = track.Artist;
         CurrentAlbum = track.Album;
@@ -139,11 +170,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
         try
         {
-            // 0. 专辑封面 → K 歌背景色（对应 macOS ColorKit 提取，含 IDToColor 缓存）
+            // 0. 专辑封面 → K 歌背景色
             if (track.ArtworkData != null)
             {
-                var color = ImageColorService.ExtractDominantColor(track.ArtworkData);
-                if (color != null)
+                var color = await Task.Run(() => ImageColorService.ExtractDominantColor(track.ArtworkData), token);
+                if (color != null && version == _taskVersion && !token.IsCancellationRequested)
                 {
                     BackgroundColor = color.Value;
                     BackgroundColorChanged?.Invoke(color.Value);
@@ -152,30 +183,34 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
             // 1. SMTC 元数据 → Spotify track ID（带 DB 缓存）
             var resolved = await _trackMapper.ResolveAsync(track.Title, track.Artist,
-                string.IsNullOrEmpty(track.Album) ? null : track.Album);
+                string.IsNullOrEmpty(track.Album) ? null : track.Album, token);
+            token.ThrowIfCancellationRequested();
             if (version != _taskVersion) return;
 
             var trackId = resolved?.TrackId ?? AlternativeId(track.Title, track.Artist);
 
             // 2. 歌词获取（缓存 → Spotify → LRCLIB → NetEase）
             var result = await _fetchService.FetchAsync(trackId, track.Title, track.Artist,
-                string.IsNullOrEmpty(track.Album) ? null : track.Album);
+                string.IsNullOrEmpty(track.Album) ? null : track.Album, token);
+            token.ThrowIfCancellationRequested();
             if (version != _taskVersion) return;
 
             // 3. 装载同步引擎（空歌词也装载：显示空状态而非旧歌词）
             _currentTrackId = trackId;
-            _sync.Lyrics = result.Lyrics.Count > 0 ? result.Lyrics : null;
+            _currentLyrics = result.Lyrics.Count > 0 ? result.Lyrics : null;
+            _sync.Lyrics = _currentLyrics;
             RaiseStateChanged();
 
-            // 4. 翻译/罗马音管线（P4 接入）：语言检测 → 产物缓存 → 模型
-            if (AppSettings.Current.TranslateEnabled || AppSettings.Current.RomanizationEnabled)
+            // 4. 翻译/罗马音管线（语言检测 → 产物缓存 → 模型）
+            if (_currentLyrics is { Count: > 0 } &&
+                (AppSettings.Current.TranslateEnabled || AppSettings.Current.RomanizationEnabled))
             {
-                await RequestTranslationAndRomanizationAsync(trackId, result.Lyrics, version);
+                await RequestTranslationAndRomanizationAsync(trackId, _currentLyrics, version, token);
             }
         }
         catch (OperationCanceledException)
         {
-            // 切歌取消，忽略
+            // 切歌/刷新取消，忽略
         }
         catch (Exception ex)
         {
@@ -191,23 +226,61 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    /// <summary>翻译/罗马音请求（P4 实现管线，当前保留钩子）。</summary>
-    private async Task RequestTranslationAndRomanizationAsync(string trackId, List<LyricLine> lyrics, int version)
+    /// <summary>刷新歌词：与切歌共用同一套"取消→清空→获取→校验→设置→产物"流程。</summary>
+    public void RefreshLyrics()
+    {
+        if (_currentTrackId == null) return;
+        var track = new MediaTrackInfo
+        {
+            Title = CurrentTitle,
+            Artist = CurrentArtist,
+            Album = CurrentAlbum
+        };
+        _ = HandleTrackChangeAsync(track);
+    }
+
+    private void CancelCurrentWork()
+    {
+        var cts = _currentCts;
+        _currentCts = null;
+        if (cts != null)
+        {
+            cts.Cancel();
+            cts.Dispose();
+        }
+    }
+
+    private void ResetLyricsState()
+    {
+        _sync.Lyrics = null;
+        _currentLyrics = null;
+        _currentTrackId = null;
+        TranslatedLyrics = new List<string>();
+        RomanizedLyrics = new List<string>();
+    }
+
+    /// <summary>
+    /// 翻译/罗马音管线（产物缓存 → 批量翻译 + 罗马音并行 → 缓存写回）。
+    /// 任务版本 + 取消 token 双重校验：处理期间切歌则丢弃结果。
+    /// </summary>
+    private async Task RequestTranslationAndRomanizationAsync(string trackId, List<LyricLine> lyrics, int version,
+        CancellationToken token)
     {
         var lang = LanguageDetector.Detect(lyrics);
+        if (lang is not (LyricLanguage.English or LyricLanguage.Japanese)) return;
 
-        // 日语 → 罗马音
-        if (AppSettings.Current.RomanizationEnabled && lang == LyricLanguage.Japanese)
-        {
-            // P4：IRomanizationProvider 接入 + 缓存
-        }
+        var (translated, romanized) = await _translationPipeline.ProcessAsync(
+            trackId, lyrics, lang,
+            AppSettings.Current.TranslateEnabled,
+            AppSettings.Current.RomanizationEnabled,
+            isCurrent: () => version == _taskVersion && !token.IsCancellationRequested,
+            token);
 
-        // 翻译（en/ja → zh）
-        if (AppSettings.Current.TranslateEnabled && lang is LyricLanguage.English or LyricLanguage.Japanese)
-        {
-            // P4：ITranslationProvider 接入 + 产物缓存（TranslationCache）
-        }
-        await Task.CompletedTask;
+        if (version != _taskVersion || token.IsCancellationRequested) return;
+
+        TranslatedLyrics = translated;
+        RomanizedLyrics = romanized;
+        RaiseStateChanged(); // K 歌窗口重建三层歌词
     }
 
     // ---- 播放控制（托盘菜单用） ----
@@ -216,32 +289,19 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public Task NextAsync() => _watcher.NextAsync();
     public Task PreviousAsync() => _watcher.PreviousAsync();
 
-    public void RefreshLyrics()
-    {
-        if (_currentTrackId == null) return;
-        var version = ++_taskVersion;
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                var result = await _fetchService.FetchAsync(_currentTrackId, CurrentTitle, CurrentArtist,
-                    string.IsNullOrEmpty(CurrentAlbum) ? null : CurrentAlbum);
-                if (version != _taskVersion) return;
-                _sync.Lyrics = result.Lyrics.Count > 0 ? result.Lyrics : null;
-                RaiseStateChanged();
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"[LyricFever][VM] refresh failed: {ex.Message}");
-            }
-        });
-    }
-
     /// <summary>替代 ID（对应 macOS alternativeID）：歌手+歌名稳定哈希，供非 Spotify 来源兜底。</summary>
     internal static string AlternativeId(string title, string artist)
     {
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes($"{artist}|{title}"));
         return Convert.ToHexString(hash)[..22].ToLowerInvariant();
+    }
+
+    public void Dispose()
+    {
+        _watcher.TrackChanged -= OnTrackChanged;
+        _watcher.PositionChanged -= OnPositionChanged;
+        _watcher.PlaybackStateChanged -= OnPlaybackStateChanged;
+        CancelCurrentWork();
     }
 
     // ---- 通知 ----

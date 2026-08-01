@@ -34,6 +34,15 @@ public sealed class SpotifyLyricProvider : ILyricProvider
     private AccessTokenJson? _accessToken;
     private long _lastCounter;
 
+    /// <summary>清除缓存的访问 token（登录状态变化时调用，强制下次重新获取）。</summary>
+    public void ClearAccessToken()
+    {
+        lock (this)
+        {
+            _accessToken = null;
+        }
+    }
+
     private bool IsAccessTokenAlive =>
         _accessToken != null &&
         _accessToken.AccessTokenExpirationTimestampMs > DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -41,7 +50,7 @@ public sealed class SpotifyLyricProvider : ILyricProvider
     public SpotifyLyricProvider()
     {
         var handler = new HttpClientHandler { AutomaticDecompression = System.Net.DecompressionMethods.All };
-        _http = new HttpClient(handler);
+        _http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
         _http.DefaultRequestHeaders.UserAgent.ParseAdd(FakeSafariUserAgent);
     }
 

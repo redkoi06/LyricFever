@@ -53,7 +53,7 @@ public partial class SpotifyLoginWindow : Window
                 {
                     CredentialStore.Set("spotify.sp_dc", cookie.Value);
                     _cookieCaptured = true;
-                    Dispatcher.BeginInvoke(() =>
+                    await Dispatcher.InvokeAsync(() =>
                     {
                         MessageBox.Show("Spotify 登录成功！", "Lyric Fever");
                         Close();

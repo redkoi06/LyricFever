@@ -61,7 +61,9 @@ public sealed class SqliteDatabase
                 romanizationVersion INTEGER NOT NULL,
                 originalLyrics TEXT NOT NULL,
                 translatedLyrics TEXT NOT NULL,
+                translationReady INTEGER NOT NULL DEFAULT 0,
                 romanizedLyrics TEXT NOT NULL,
+                romanizationReady INTEGER NOT NULL DEFAULT 0,
                 createdAt TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS SpotifyTrackMap (
@@ -74,5 +76,34 @@ public sealed class SqliteDatabase
             );
             """;
         cmd.ExecuteNonQuery();
+
+        // 旧库迁移：TranslationCache 补 ready 列（v1 表结构无此列）
+        foreach (var (table, column, ddl) in new[]
+                 {
+                     ("TranslationCache", "translationReady",
+                      "ALTER TABLE TranslationCache ADD COLUMN translationReady INTEGER NOT NULL DEFAULT 0"),
+                     ("TranslationCache", "romanizationReady",
+                      "ALTER TABLE TranslationCache ADD COLUMN romanizationReady INTEGER NOT NULL DEFAULT 0"),
+                 })
+        {
+            if (!ColumnExists(conn, table, column))
+            {
+                using var alter = conn.CreateCommand();
+                alter.CommandText = ddl;
+                alter.ExecuteNonQuery();
+            }
+        }
+    }
+
+    private static bool ColumnExists(SqliteConnection conn, string table, string column)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"PRAGMA table_info({table})";
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            if (reader.GetString(1) == column) return true;
+        }
+        return false;
     }
 }

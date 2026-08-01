@@ -120,7 +120,9 @@ public sealed class LyricsRepository
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT songColor FROM IDToColor WHERE id = $id LIMIT 1";
         cmd.Parameters.AddWithValue("$id", trackId);
-        return cmd.ExecuteScalar() as int?;
+        var value = cmd.ExecuteScalar();
+        // SQLite INTEGER 以 Int64 返回，`as int?` 会恒为 null
+        return value == null || value == DBNull.Value ? null : Convert.ToInt32(value);
     }
 
     public void SetColor(string trackId, int color)

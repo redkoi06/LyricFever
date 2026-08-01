@@ -41,7 +41,7 @@ public sealed class MediaSessionWatcher : IDisposable
     public MediaSessionWatcher()
     {
         _timelineTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-        _timelineTimer.Tick += async (_, _) => await PullTimelineAsync();
+        _timelineTimer.Tick += (_, _) => PullTimeline();
     }
 
     public async Task StartAsync()
@@ -82,11 +82,11 @@ public sealed class MediaSessionWatcher : IDisposable
     private async void OnMediaPropertiesChanged(GlobalSystemMediaTransportControlsSession sender,
         MediaPropertiesChangedEventArgs args) => await RefreshTrackAsync();
 
-    private async void OnPlaybackInfoChanged(GlobalSystemMediaTransportControlsSession sender,
-        PlaybackInfoChangedEventArgs args) => await RefreshPlaybackStateAsync();
+    private void OnPlaybackInfoChanged(GlobalSystemMediaTransportControlsSession sender,
+        PlaybackInfoChangedEventArgs args) => RefreshPlaybackState();
 
-    private async void OnTimelinePropertiesChanged(GlobalSystemMediaTransportControlsSession sender,
-        TimelinePropertiesChangedEventArgs args) => await PullTimelineAsync();
+    private void OnTimelinePropertiesChanged(GlobalSystemMediaTransportControlsSession sender,
+        TimelinePropertiesChangedEventArgs args) => PullTimeline();
 
     private async Task RefreshTrackAsync()
     {
@@ -140,7 +140,7 @@ public sealed class MediaSessionWatcher : IDisposable
         }
     }
 
-    private async Task RefreshPlaybackStateAsync()
+    private void RefreshPlaybackState()
     {
         if (_session == null) return;
         try
@@ -152,7 +152,7 @@ public sealed class MediaSessionWatcher : IDisposable
         catch { /* ignore */ }
     }
 
-    private async Task PullTimelineAsync()
+    private void PullTimeline()
     {
         if (_session == null) return;
         try
