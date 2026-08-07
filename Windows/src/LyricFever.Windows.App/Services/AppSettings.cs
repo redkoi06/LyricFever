@@ -10,7 +10,7 @@ namespace LyricFever.Windows.App.Services;
 public sealed class AppSettings
 {
     private const int CurrentSettingsSchemaVersion = 4;
-    private const int CurrentTranslationModelVersion = 3;
+    private const int CurrentTranslationModelVersion = 4;
     private static readonly string SettingsPath =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "LyricFever", "settings.json");

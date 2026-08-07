@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using Hardcodet.Wpf.TaskbarNotification;
 using LyricFever.Windows.App.ViewModels;
 using LyricFever.Windows.App.Views;
@@ -20,12 +21,18 @@ public sealed class TrayIconService : IDisposable
     private SettingsWindow? _settingsWindow;
     private SpotifyLoginWindow? _loginWindow;
     private KaraokeWindow? _karaokeWindow;
+    private readonly DispatcherTimer _hideDelayTimer;
     private bool _userWantsLyricsWindow = true;
     private bool? _lastWindowVisibility;
 
     public TrayIconService(MainViewModel viewModel)
     {
         _viewModel = viewModel;
+        _hideDelayTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(800)
+        };
+        _hideDelayTimer.Tick += OnHideDelayElapsed;
     }
 
     public void Initialize()
@@ -63,7 +70,42 @@ public sealed class TrayIconService : IDisposable
     private void SyncLyricsWindowVisibility()
     {
         var shouldShow = App.CurrentApp.IsVisualInspectionMode ||
+                          (_userWantsLyricsWindow && _viewModel.HasMediaSession && _viewModel.IsPlaying);
+
+        if (shouldShow)
+        {
+            _hideDelayTimer.Stop();
+            ApplyLyricsWindowVisibility(true);
+            return;
+        }
+
+        // Apple Music can briefly report Paused while its SMTC timeline is refreshed.
+        // Keep an already visible card alive across that transient state, but preserve
+        // immediate hiding for explicit user actions and confirmed session loss.
+        var shouldDebouncePlaybackPause = _userWantsLyricsWindow &&
+                                           _viewModel.HasMediaSession &&
+                                           !_viewModel.IsPlaying &&
+                                           _karaokeWindow?.IsVisible == true;
+        if (shouldDebouncePlaybackPause)
+        {
+            if (!_hideDelayTimer.IsEnabled) _hideDelayTimer.Start();
+            return;
+        }
+
+        _hideDelayTimer.Stop();
+        ApplyLyricsWindowVisibility(false);
+    }
+
+    private void OnHideDelayElapsed(object? sender, EventArgs e)
+    {
+        _hideDelayTimer.Stop();
+        var shouldShow = App.CurrentApp.IsVisualInspectionMode ||
                          (_userWantsLyricsWindow && _viewModel.HasMediaSession && _viewModel.IsPlaying);
+        ApplyLyricsWindowVisibility(shouldShow);
+    }
+
+    private void ApplyLyricsWindowVisibility(bool shouldShow)
+    {
         if (_lastWindowVisibility != shouldShow)
         {
             AppLog.Info("Tray", $"lyricsWindowVisible={shouldShow}; userEnabled={_userWantsLyricsWindow}; " +
@@ -186,6 +228,8 @@ public sealed class TrayIconService : IDisposable
     public void Dispose()
     {
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        _hideDelayTimer.Stop();
+        _hideDelayTimer.Tick -= OnHideDelayElapsed;
         if (_karaokeWindow != null)
             _karaokeWindow.HideRequested -= OnLyricsHideRequested;
         _trayIcon?.Dispose();

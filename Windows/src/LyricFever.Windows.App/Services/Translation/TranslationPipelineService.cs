@@ -28,11 +28,22 @@ public sealed class TranslationPipelineService : IDisposable
         _humanTranslator = humanTranslator;
     }
 
+    public IReadOnlyList<string>? TryGetCachedHumanTranslation(
+        string trackId, List<LyricLine> lyrics, LyricLanguage language)
+    {
+        if (language is not (LyricLanguage.English or LyricLanguage.Japanese)) return null;
+        var sourceCode = language == LyricLanguage.Japanese ? "ja" : "en";
+        var hit = _cache.Get(trackId, lyrics, sourceCode, TargetLanguage,
+            AppSettings.Current.TranslationModelVersion, AppSettings.Current.RomanizationVersion);
+        return hit?.TranslationReady == true ? Pad(hit.Translated, lyrics.Count) : null;
+    }
+
     public async Task<(List<string> Translated, List<string> Romanized)> ProcessAsync(
         string trackId, List<LyricLine> lyrics, LyricLanguage language,
         string trackName, string? artistName, string? albumName,
         bool translateEnabled, bool romanizationEnabled,
-        Func<bool> isCurrent, CancellationToken cancellationToken = default)
+        Func<bool> isCurrent, CancellationToken cancellationToken = default,
+        IReadOnlyList<string>? preferredHumanTranslation = null)
     {
         var count = lyrics.Count;
         var needTranslation = translateEnabled && language is LyricLanguage.English or LyricLanguage.Japanese;
@@ -40,8 +51,13 @@ public sealed class TranslationPipelineService : IDisposable
 
         var translated = new List<string>(count);
         var romanized = new List<string>(count);
-        var translationReady = false;
+        var preferredTranslationReady = needTranslation &&
+                                        preferredHumanTranslation?.Count == count;
+        var translationReady = preferredTranslationReady;
         var romanizationReady = false;
+
+        if (preferredTranslationReady)
+            translated = preferredHumanTranslation!.Select(text => text?.Trim() ?? "").ToList();
 
         if (needTranslation || needRomanization)
         {
@@ -50,9 +66,9 @@ public sealed class TranslationPipelineService : IDisposable
                 AppSettings.Current.TranslationModelVersion, AppSettings.Current.RomanizationVersion);
             if (hit != null)
             {
-                translated = hit.Translated;
+                if (!translationReady) translated = hit.Translated;
                 romanized = hit.Romanized;
-                translationReady = hit.TranslationReady;
+                translationReady = translationReady || hit.TranslationReady;
                 romanizationReady = hit.RomanizationReady;
             }
         }
@@ -82,7 +98,8 @@ public sealed class TranslationPipelineService : IDisposable
             romanizationReady = true;
         }
 
-        if ((translateNeeded || romanizeNeeded) && (translationReady || romanizationReady))
+        if ((translateNeeded || romanizeNeeded || preferredTranslationReady) &&
+            (translationReady || romanizationReady))
         {
             var sourceCode = language == LyricLanguage.Japanese ? "ja" : "en";
             _cache.Put(trackId, lyrics, sourceCode, TargetLanguage,

@@ -44,6 +44,21 @@ public sealed class NetEaseLyricProvider : ILyricProvider, IHumanTranslationProv
         return new NetworkFetchReturn { Lyrics = bundle.Lyrics };
     }
 
+    public async Task<HumanLyricBundle?> FetchHumanLyricBundleAsync(
+        string trackName, string? artistName, string? albumName,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(artistName)) return null;
+
+        var bundle = await FetchBundleAsync(trackName, artistName, albumName, cancellationToken);
+        if (bundle == null || bundle.TranslatedLyrics.Count == 0) return null;
+
+        var aligned = AlignTranslations(bundle.Lyrics, bundle.Lyrics, bundle.TranslatedLyrics);
+        if (!HasSufficientCoverage(bundle.Lyrics, aligned)) return null;
+
+        return new HumanLyricBundle(bundle.Lyrics.ToList(), aligned);
+    }
+
     public async Task<IReadOnlyList<string>?> FetchTranslationAsync(
         string trackName, string? artistName, string? albumName,
         IReadOnlyList<LyricLine> referenceLyrics,
@@ -168,10 +183,15 @@ public sealed class NetEaseLyricProvider : ILyricProvider, IHumanTranslationProv
         var referenceTimes = referenceLyrics.Select(line => line.StartTimeInMs).ToArray();
         if (referenceTimes.Any(time => double.IsNaN(time) || double.IsInfinity(time))) return result;
 
-        foreach (var translated in translatedLyrics)
+        var sourceTimes = sourceLyrics.Select(line => line.StartTimeInMs + offset).ToArray();
+        var translatedTimes = translatedLyrics.Select(line => line.StartTimeInMs + offset).ToArray();
+        var mappedIntervals = new List<(int ReferenceIndex, int SourceIndex, int TranslationIndex)>();
+
+        for (var translationIndex = 0; translationIndex < translatedLyrics.Count; translationIndex++)
         {
+            var translated = translatedLyrics[translationIndex];
             var text = translated.Words.Trim();
-            var time = translated.StartTimeInMs + offset;
+            var time = translatedTimes[translationIndex];
             if (text.Length == 0 || double.IsNaN(time) || time < referenceTimes[0] - 1500) continue;
 
             var index = Array.BinarySearch(referenceTimes, time + 250);
@@ -179,6 +199,48 @@ public sealed class NetEaseLyricProvider : ILyricProvider, IHumanTranslationProv
             if (index < 0 || index >= result.Count) continue;
 
             result[index] = result[index].Length == 0 ? text : $"{result[index]} {text}";
+
+            var sourceIndex = Array.BinarySearch(sourceTimes, time + 250);
+            if (sourceIndex < 0) sourceIndex = ~sourceIndex - 1;
+            if (sourceIndex >= 0 && sourceIndex < sourceLyrics.Count)
+                mappedIntervals.Add((index, sourceIndex, translationIndex));
+        }
+
+        // One provider line can be split into multiple lines by Spotify/LRCLIB. After all
+        // translation fragments have been merged, repeat the complete translation into
+        // blank reference lines that still belong to the same provider interval.
+        foreach (var (referenceIndex, sourceIndex, translationIndex) in mappedIntervals.Distinct())
+        {
+            var completeTranslation = result[referenceIndex];
+            if (string.IsNullOrWhiteSpace(completeTranslation)) continue;
+
+            var hasNextSource = sourceIndex + 1 < sourceTimes.Length;
+            var sourceIntervalEnd = hasNextSource
+                ? sourceTimes[sourceIndex + 1]
+                : sourceTimes[sourceIndex] + 12_000;
+            var hasNextTranslation = translationIndex + 1 < translatedTimes.Length;
+            var intervalEnd = hasNextTranslation
+                ? Math.Min(
+                    Math.Max(sourceIntervalEnd, translatedTimes[translationIndex + 1]),
+                    translatedTimes[translationIndex] + 8_000)
+                : sourceIntervalEnd;
+            var normalizedSource = NormalizeLyric(sourceLyrics[sourceIndex].Words);
+
+            for (var nextIndex = referenceIndex + 1; nextIndex < referenceLyrics.Count; nextIndex++)
+            {
+                var referenceTime = referenceTimes[nextIndex];
+                var normalizedReference = NormalizeLyric(referenceLyrics[nextIndex].Words);
+                var insideTimedInterval = (hasNextSource || hasNextTranslation) &&
+                                          referenceTime < intervalEnd - 250;
+                var textBelongsToSource = normalizedReference.Length >= 2 &&
+                                          normalizedSource.Contains(normalizedReference,
+                                              StringComparison.Ordinal) &&
+                                          referenceTime < intervalEnd + 750;
+                if (!insideTimedInterval && !textBelongsToSource) break;
+
+                if (string.IsNullOrWhiteSpace(result[nextIndex]))
+                    result[nextIndex] = completeTranslation;
+            }
         }
         return result;
     }

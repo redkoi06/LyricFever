@@ -29,6 +29,7 @@ public partial class App : Application
 
     protected override async void OnStartup(StartupEventArgs e)
     {
+        EnsureWindowsDirectoryEnvironment();
         base.OnStartup(e);
         IsVisualInspectionMode = e.Args.Contains("--visual-inspection", StringComparer.OrdinalIgnoreCase);
         AppLog.Initialize();
@@ -74,7 +75,8 @@ public partial class App : Application
             TranslationCache,
             netEaseProvider);
 
-        MainViewModel = new MainViewModel(_watcher, trackMapper, fetchService, LyricsRepository, translationPipeline);
+        MainViewModel = new MainViewModel(
+            _watcher, trackMapper, fetchService, LyricsRepository, translationPipeline, netEaseProvider);
         _trayIcon = new TrayIconService(MainViewModel);
         _trayIcon.Initialize();
         _singleInstance!.StartListening(() => Dispatcher.BeginInvoke(_trayIcon.ShowLyricsWindow));
@@ -89,6 +91,14 @@ public partial class App : Application
         "Any" => MediaPlayerPreference.Any,
         _ => MediaPlayerPreference.AppleMusic
     };
+
+    private static void EnsureWindowsDirectoryEnvironment()
+    {
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("windir"))) return;
+        var windowsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        if (!string.IsNullOrWhiteSpace(windowsDirectory))
+            Environment.SetEnvironmentVariable("windir", windowsDirectory);
+    }
 
     private static void RemoveLegacyLocalModels()
     {

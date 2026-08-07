@@ -33,6 +33,7 @@ public sealed class MediaSessionWatcher : IDisposable
     private readonly DispatcherTimer _timelineTimer;
     private readonly DispatcherTimer _watchdogTimer;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
+    private readonly PlaybackPositionStabilizer _positionStabilizer = new();
     private MediaTrackInfo? _lastTrack;
     private DateTimeOffset? _sessionMissingSince;
     private string _lastSessionInventory = "";
@@ -169,6 +170,7 @@ public sealed class MediaSessionWatcher : IDisposable
         _session = session;
         _sessionRevision++;
         _lastTrack = null;
+        _positionStabilizer.Reset();
         Interlocked.Exchange(ref _refreshPending, 0);
 
         if (_session != null)
@@ -286,6 +288,8 @@ public sealed class MediaSessionWatcher : IDisposable
                           !string.Equals(_lastTrack.Artist, track.Artist, StringComparison.Ordinal) ||
                           !string.Equals(_lastTrack.Album, track.Album, StringComparison.Ordinal);
 
+            if (changed) _positionStabilizer.Reset();
+
             if (changed && props.Thumbnail != null)
             {
                 try
@@ -314,7 +318,7 @@ public sealed class MediaSessionWatcher : IDisposable
             if (changed || string.Equals(reason, "watchdog", StringComparison.Ordinal))
                 TrackChanged?.Invoke(track);
             PlaybackStateChanged?.Invoke(track.IsPlaying);
-            PositionChanged?.Invoke(track.PositionMs);
+            EmitPosition(track.PositionMs, track.IsPlaying);
         }
         catch (Exception ex)
         {
@@ -362,12 +366,21 @@ public sealed class MediaSessionWatcher : IDisposable
         try
         {
             var timeline = session.GetTimelineProperties();
-            PositionChanged?.Invoke(EstimatePositionMs(timeline, session.GetPlaybackInfo()));
+            var playback = session.GetPlaybackInfo();
+            var isPlaying = playback?.PlaybackStatus ==
+                            GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+            EmitPosition(EstimatePositionMs(timeline, playback), isPlaying);
         }
         catch
         {
             // session 重建期间的瞬态，watchdog 会重新绑定。
         }
+    }
+
+    private void EmitPosition(double positionMs, bool isPlaying)
+    {
+        var stabilized = _positionStabilizer.Observe(positionMs, isPlaying);
+        if (stabilized.HasValue) PositionChanged?.Invoke(stabilized.Value);
     }
 
     public async Task PlayPauseAsync()

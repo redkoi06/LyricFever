@@ -29,6 +29,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly LyricFetchService _fetchService;
     private readonly LyricsRepository _repo;
     private readonly TranslationPipelineService _translationPipeline;
+    private readonly IHumanTranslationProvider _humanTranslationProvider;
     private readonly LyricSyncEngine _sync = new();
 
     private string? _currentTrackId;
@@ -42,13 +43,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public MainViewModel(MediaSessionWatcher watcher, SpotifyTrackMapper trackMapper,
         LyricFetchService fetchService, LyricsRepository repo,
-        TranslationPipelineService translationPipeline)
+        TranslationPipelineService translationPipeline,
+        IHumanTranslationProvider humanTranslationProvider)
     {
         _watcher = watcher;
         _trackMapper = trackMapper;
         _fetchService = fetchService;
         _repo = repo;
         _translationPipeline = translationPipeline;
+        _humanTranslationProvider = humanTranslationProvider;
 
         _watcher.TrackChanged += OnTrackChanged;
         _watcher.PositionChanged += OnPositionChanged;
@@ -133,6 +136,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
         else
         {
+            _lastPositionMs = -1;
             _emptyRecoveryAttempt = 0;
             _emptyRetryNotBefore = DateTimeOffset.MinValue;
             AppLog.Info("VM", $"track event title={track.Title}; artist={track.Artist}; source={track.AppId}");
@@ -227,8 +231,24 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
             var trackId = resolved?.TrackId ?? AlternativeId(track.Title, track.Artist);
 
-            // 2. 歌词获取（缓存 → Spotify → LRCLIB → NetEase）
-            var result = await FetchLyricsWithRetryAsync(trackId, track, version, token);
+            // 2. 优先使用同一平台成对提供的原文和人工译文；不可用时走普通兜底链。
+            var humanBundle = AppSettings.Current.TranslateEnabled
+                ? TryGetCachedHumanBundle(trackId)
+                : null;
+            if (humanBundle == null && AppSettings.Current.TranslateEnabled)
+                humanBundle = await FetchPreferredHumanBundleAsync(track, version, token);
+            LyricFetchResult result;
+            if (humanBundle != null)
+            {
+                var sourceLyrics = humanBundle.SourceLyrics.ToList();
+                _repo.Upsert(sourceLyrics, trackId, track.Title);
+                result = new LyricFetchResult { Lyrics = sourceLyrics };
+                AppLog.Info("VM", $"using matched human lyric bundle; title={track.Title}; count={sourceLyrics.Count}");
+            }
+            else
+            {
+                result = await FetchLyricsWithRetryAsync(trackId, track, version, token);
+            }
             token.ThrowIfCancellationRequested();
             if (version != _taskVersion) return;
             AppLog.Info("VM", $"lyrics fetched trackId={trackId}; count={result.Lyrics.Count}");
@@ -237,6 +257,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             _currentTrackId = trackId;
             _currentLyrics = result.Lyrics.Count > 0 ? result.Lyrics : null;
             _sync.Lyrics = _currentLyrics;
+            TranslatedLyrics = humanBundle?.TranslatedLyrics.ToList() ?? new List<string>();
             if (_currentLyrics == null)
                 ScheduleEmptyRecovery();
             else
@@ -250,7 +271,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (_currentLyrics is { Count: > 0 } &&
                 (AppSettings.Current.TranslateEnabled || AppSettings.Current.RomanizationEnabled))
             {
-                await RequestTranslationAndRomanizationAsync(trackId, _currentLyrics, version, token);
+                await RequestTranslationAndRomanizationAsync(
+                    trackId, _currentLyrics, version, token, humanBundle?.TranslatedLyrics);
             }
         }
         catch (OperationCanceledException)
@@ -289,6 +311,58 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             await Task.Delay(delays[attempt], token);
         }
         return result;
+    }
+
+    private async Task<HumanLyricBundle?> FetchPreferredHumanBundleAsync(
+        MediaTrackInfo track, int version, CancellationToken token)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        try
+        {
+            var bundle = await _humanTranslationProvider.FetchHumanLyricBundleAsync(
+                track.Title, track.Artist,
+                string.IsNullOrWhiteSpace(track.Album) ? null : track.Album,
+                timeout.Token);
+            token.ThrowIfCancellationRequested();
+            if (version != _taskVersion) throw new OperationCanceledException();
+            if (bundle == null || bundle.SourceLyrics.Count == 0 ||
+                bundle.SourceLyrics.Count != bundle.TranslatedLyrics.Count)
+                return null;
+            return bundle;
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
+        {
+            AppLog.Info("VM", $"matched human lyric bundle timed out; title={track.Title}");
+            return null;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("HumanBundle", ex);
+            return null;
+        }
+    }
+
+    private HumanLyricBundle? TryGetCachedHumanBundle(string trackId)
+    {
+        try
+        {
+            var lyrics = _repo.GetLyrics(trackId);
+            if (lyrics is not { Count: > 0 }) return null;
+            var translated = _translationPipeline.TryGetCachedHumanTranslation(
+                trackId, lyrics, ResolveSourceLanguage(lyrics));
+            if (translated == null || translated.Count != lyrics.Count) return null;
+            AppLog.Info("VM", $"using cached matched lyric products; trackId={trackId}; count={lyrics.Count}");
+            return new HumanLyricBundle(lyrics, translated);
+        }
+        catch (LyricsRepositoryCorruptEntryException)
+        {
+            return null;
+        }
     }
 
     private void ScheduleEmptyRecovery()
@@ -338,15 +412,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     /// 任务版本 + 取消 token 双重校验：处理期间切歌则丢弃结果。
     /// </summary>
     private async Task RequestTranslationAndRomanizationAsync(string trackId, List<LyricLine> lyrics, int version,
-        CancellationToken token)
+        CancellationToken token, IReadOnlyList<string>? preferredHumanTranslation = null)
     {
         // 设置页 SourceLanguage 覆盖自动检测（auto → 自动识别）
-        var lang = AppSettings.Current.SourceLanguage switch
-        {
-            "en" => LyricLanguage.English,
-            "ja" => LyricLanguage.Japanese,
-            _ => LanguageDetector.Detect(lyrics)
-        };
+        var lang = ResolveSourceLanguage(lyrics);
         if (lang is not (LyricLanguage.English or LyricLanguage.Japanese)) return;
 
         var (translated, romanized) = await _translationPipeline.ProcessAsync(
@@ -355,7 +424,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             AppSettings.Current.TranslateEnabled,
             AppSettings.Current.RomanizationEnabled,
             isCurrent: () => version == _taskVersion && !token.IsCancellationRequested,
-            token);
+            cancellationToken: token,
+            preferredHumanTranslation: preferredHumanTranslation);
 
         if (version != _taskVersion || token.IsCancellationRequested) return;
 
@@ -363,6 +433,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         RomanizedLyrics = romanized;
         RaiseStateChanged(); // K 歌窗口重建三层歌词
     }
+
+    private static LyricLanguage ResolveSourceLanguage(List<LyricLine> lyrics) =>
+        AppSettings.Current.SourceLanguage switch
+        {
+            "en" => LyricLanguage.English,
+            "ja" => LyricLanguage.Japanese,
+            _ => LanguageDetector.Detect(lyrics)
+        };
 
     // ---- 播放控制（托盘菜单用） ----
 

@@ -27,6 +27,12 @@ public interface ILyricProvider
 /// </summary>
 public interface IHumanTranslationProvider
 {
+    Task<HumanLyricBundle?> FetchHumanLyricBundleAsync(
+        string trackName,
+        string? artistName,
+        string? albumName,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<string>?> FetchTranslationAsync(
         string trackName,
         string? artistName,
@@ -34,6 +40,14 @@ public interface IHumanTranslationProvider
         IReadOnlyList<LyricLine> referenceLyrics,
         CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// A matched original-lyric and human-translation pair from one platform.
+/// Both lists use the same timeline and must have identical lengths.
+/// </summary>
+public sealed record HumanLyricBundle(
+    IReadOnlyList<LyricLine> SourceLyrics,
+    IReadOnlyList<string> TranslatedLyrics);
 
 /// <summary>歌词源类型。</summary>
 public enum LyricProviderType

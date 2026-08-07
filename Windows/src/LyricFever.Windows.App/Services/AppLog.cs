@@ -23,7 +23,7 @@ public static class AppLog
 
     public static void Info(string area, string message) => Write("INFO", area, message);
     public static void Error(string area, Exception exception) =>
-        Write("ERROR", area, $"{exception.GetType().Name}: {exception.Message}\n{exception.StackTrace}");
+        Write("ERROR", area, exception.ToString());
 
     private static void Write(string level, string area, string message)
     {
