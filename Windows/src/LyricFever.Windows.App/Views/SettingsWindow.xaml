@@ -44,7 +44,7 @@
             <!-- 翻译 -->
             <TabItem Header="翻译">
                 <StackPanel Margin="12">
-                    <CheckBox IsChecked="{Binding TranslateEnabled}" Content="启用歌词翻译（本地模型）"/>
+                    <CheckBox IsChecked="{Binding TranslateEnabled}" Content="启用平台人工译词"/>
                     <TextBlock Text="源语言：" Style="{StaticResource SettingLabel}"/>
                     <ComboBox Width="200" HorizontalAlignment="Left"
                               SelectedValue="{Binding SourceLanguage}"
@@ -53,7 +53,7 @@
                         <ComboBoxItem Content="英文" Tag="en"/>
                         <ComboBoxItem Content="日文" Tag="ja"/>
                     </ComboBox>
-                    <TextBlock Text="目标语言固定为中文。模型按需加载，空闲自动卸载。"
+                    <TextBlock Text="目标语言固定为中文；无可靠人工译词时不显示译文。"
                                Style="{StaticResource SettingLabel}" Foreground="Gray" FontSize="12"/>
                     <CheckBox IsChecked="{Binding RomanizationEnabled}" Content="日文歌词标注罗马音" Margin="0,12,0,0"/>
                 </StackPanel>
@@ -64,8 +64,8 @@
                 <StackPanel Margin="12">
                     <TextBlock Text="字体大小" Style="{StaticResource SettingLabel}"/>
                     <Slider Minimum="12" Maximum="48" Value="{Binding KaraokeFontSize}"/>
-                    <TextBlock Text="窗口透明度" Style="{StaticResource SettingLabel}"/>
-                    <Slider Minimum="0.3" Maximum="1.0" Value="{Binding KaraokeOpacity}"/>
+                    <TextBlock Text="背景不透明度（保证白字可读）" Style="{StaticResource SettingLabel}"/>
+                    <Slider Minimum="0.78" Maximum="1.0" Value="{Binding KaraokeOpacity}"/>
                     <CheckBox IsChecked="{Binding KaraokeUseBackgroundColor}" Content="使用专辑封面色作为背景"/>
                     <TextBlock Text="歌词偏移（毫秒）" Style="{StaticResource SettingLabel}"/>
                     <Slider Minimum="-2000" Maximum="2000" Value="{Binding LyricOffsetMs}"/>

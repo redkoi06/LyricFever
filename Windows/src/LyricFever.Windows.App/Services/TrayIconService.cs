@@ -1,6 +1,8 @@
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using Hardcodet.Wpf.TaskbarNotification;
 using LyricFever.Windows.App.ViewModels;
 using LyricFever.Windows.App.Views;
@@ -8,7 +10,8 @@ using LyricFever.Windows.App.Views;
 namespace LyricFever.Windows.App.Services;
 
 /// <summary>
-/// 系统托盘：左键单击开关 K 歌窗口（P3），右键菜单提供播放控制/登录/设置/退出。
+/// 系统托盘与字幕窗口生命周期。正式运行时字幕只在媒体 session 正在播放时可见；
+/// 暂停、停止或 session 消失会隐藏，恢复播放后按用户开关重新显示。
 /// </summary>
 public sealed class TrayIconService : IDisposable
 {
@@ -17,6 +20,8 @@ public sealed class TrayIconService : IDisposable
     private SettingsWindow? _settingsWindow;
     private SpotifyLoginWindow? _loginWindow;
     private KaraokeWindow? _karaokeWindow;
+    private bool _userWantsLyricsWindow = true;
+    private bool? _lastWindowVisibility;
 
     public TrayIconService(MainViewModel viewModel)
     {
@@ -27,42 +32,72 @@ public sealed class TrayIconService : IDisposable
     {
         _trayIcon = new TaskbarIcon
         {
-            IconSource = CreateIcon(),
+            IconSource = LoadOriginalAppIcon(),
             ToolTipText = "Lyric Fever",
             ContextMenu = CreateContextMenu()
         };
         _trayIcon.TrayLeftMouseUp += (_, _) => ToggleLyricsWindow();
-        ShowLyricsWindow();
+        _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        SyncLyricsWindowVisibility();
     }
 
     public void ShowLyricsWindow()
     {
-        if (_karaokeWindow == null)
-        {
-            _karaokeWindow = new KaraokeWindow(_viewModel);
-            _karaokeWindow.Closed += (_, _) => _karaokeWindow = null;
-        }
-
-        if (!_karaokeWindow.IsVisible)
-            _karaokeWindow.Show();
+        _userWantsLyricsWindow = true;
+        SyncLyricsWindowVisibility();
     }
 
     private void ToggleLyricsWindow()
     {
-        if (_karaokeWindow == null)
+        _userWantsLyricsWindow = !_userWantsLyricsWindow;
+        SyncLyricsWindowVisibility();
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is not (nameof(MainViewModel.IsPlaying) or nameof(MainViewModel.HasMediaSession)))
+            return;
+        Application.Current.Dispatcher.BeginInvoke(SyncLyricsWindowVisibility);
+    }
+
+    private void SyncLyricsWindowVisibility()
+    {
+        var shouldShow = App.CurrentApp.IsVisualInspectionMode ||
+                         (_userWantsLyricsWindow && _viewModel.HasMediaSession && _viewModel.IsPlaying);
+        if (_lastWindowVisibility != shouldShow)
         {
-            _karaokeWindow = new KaraokeWindow(_viewModel);
-            _karaokeWindow.Closed += (_, _) => _karaokeWindow = null;
+            AppLog.Info("Tray", $"lyricsWindowVisible={shouldShow}; userEnabled={_userWantsLyricsWindow}; " +
+                                $"hasSession={_viewModel.HasMediaSession}; isPlaying={_viewModel.IsPlaying}; " +
+                                $"visualInspection={App.CurrentApp.IsVisualInspectionMode}");
+            _lastWindowVisibility = shouldShow;
+        }
+        if (!shouldShow)
+        {
+            _karaokeWindow?.Hide();
+            return;
         }
 
-        if (_karaokeWindow.IsVisible)
+        EnsureKaraokeWindow();
+        if (_karaokeWindow is { IsVisible: false }) _karaokeWindow.Show();
+    }
+
+    private void EnsureKaraokeWindow()
+    {
+        if (_karaokeWindow != null) return;
+        _karaokeWindow = new KaraokeWindow(_viewModel);
+        _karaokeWindow.HideRequested += OnLyricsHideRequested;
+        _karaokeWindow.Closed += (_, _) =>
         {
-            _karaokeWindow.Hide();
-        }
-        else
-        {
-            ShowLyricsWindow();
-        }
+            if (_karaokeWindow != null)
+                _karaokeWindow.HideRequested -= OnLyricsHideRequested;
+            _karaokeWindow = null;
+        };
+    }
+
+    private void OnLyricsHideRequested()
+    {
+        _userWantsLyricsWindow = false;
+        SyncLyricsWindowVisibility();
     }
 
     private void ToggleSettingsWindow()
@@ -102,16 +137,15 @@ public sealed class TrayIconService : IDisposable
         var lyrics = new MenuItem { Header = "显示歌词窗口" };
         lyrics.Click += (_, _) => ToggleLyricsWindow();
         menu.Items.Add(lyrics);
-
         menu.Items.Add(new Separator());
 
         var playPause = new MenuItem { Header = "播放 / 暂停" };
         playPause.Click += async (_, _) => await _viewModel.PlayPauseAsync();
         menu.Items.Add(playPause);
 
-        var prev = new MenuItem { Header = "上一首" };
-        prev.Click += async (_, _) => await _viewModel.PreviousAsync();
-        menu.Items.Add(prev);
+        var previous = new MenuItem { Header = "上一首" };
+        previous.Click += async (_, _) => await _viewModel.PreviousAsync();
+        menu.Items.Add(previous);
 
         var next = new MenuItem { Header = "下一首" };
         next.Click += async (_, _) => await _viewModel.NextAsync();
@@ -120,7 +154,6 @@ public sealed class TrayIconService : IDisposable
         var refresh = new MenuItem { Header = "刷新歌词" };
         refresh.Click += (_, _) => _viewModel.RefreshLyrics();
         menu.Items.Add(refresh);
-
         menu.Items.Add(new Separator());
 
         var login = new MenuItem { Header = "Spotify 登录" };
@@ -130,49 +163,32 @@ public sealed class TrayIconService : IDisposable
         var settings = new MenuItem { Header = "设置" };
         settings.Click += (_, _) => ToggleSettingsWindow();
         menu.Items.Add(settings);
-
         menu.Items.Add(new Separator());
 
         var quit = new MenuItem { Header = "退出" };
         quit.Click += (_, _) => Application.Current.Shutdown();
         menu.Items.Add(quit);
-
         return menu;
     }
 
-    private static ImageSource CreateIcon()
+    private static ImageSource LoadOriginalAppIcon()
     {
-        // 简易音符图标（白色音符 + 深色底），避免依赖 .ico 资源文件
-        var drawing = new DrawingGroup();
-        var bg = new GeometryDrawing
-        {
-            Brush = new SolidColorBrush(Color.FromRgb(30, 30, 34)),
-            Geometry = new EllipseGeometry(new Point(9, 9), 9, 9)
-        };
-        drawing.Children.Add(bg);
-
-        var note = new GeometryGroup();
-        note.Children.Add(new EllipseGeometry(new Point(6, 14), 2.6, 2.6));
-        note.Children.Add(new EllipseGeometry(new Point(12.5, 10), 2.6, 2.6));
-        note.Children.Add(new RectangleGeometry(new Rect(8.3, 4.2, 1.4, 9.2)));
-        note.Children.Add(new RectangleGeometry(new Rect(1.9, 8.2, 1.4, 9.2)));
-        note.Children.Add(new LineGeometry(new Point(3.3, 8.2), new Point(9.7, 7.0)));
-        var noteDrawing = new GeometryDrawing
-        {
-            Brush = Brushes.White,
-            Geometry = note
-        };
-        drawing.Children.Add(noteDrawing);
-
-        return new DrawingImage(drawing);
+        var image = new BitmapImage();
+        image.BeginInit();
+        image.UriSource = new Uri(
+            "pack://application:,,,/Assets/LyricFeverTray.png", UriKind.Absolute);
+        image.CacheOption = BitmapCacheOption.OnLoad;
+        image.EndInit();
+        image.Freeze();
+        return image;
     }
 
     public void Dispose()
     {
-        if (_trayIcon != null)
-        {
-            _trayIcon.Dispose();
-            _trayIcon = null;
-        }
+        _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        if (_karaokeWindow != null)
+            _karaokeWindow.HideRequested -= OnLyricsHideRequested;
+        _trayIcon?.Dispose();
+        _trayIcon = null;
     }
 }

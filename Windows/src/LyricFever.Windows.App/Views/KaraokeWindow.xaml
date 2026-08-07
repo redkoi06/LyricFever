@@ -9,15 +9,14 @@
         ShowInTaskbar="False"
         ShowActivated="False"
         ResizeMode="NoResize"
-        Width="800" Height="130"
-        WindowStartupLocation="Manual">
-    <Border x:Name="RootBorder" CornerRadius="16" BorderThickness="1"
-            BorderBrush="#26FFFFFF"
+        Width="520" Height="100"
+        WindowStartupLocation="Manual"
+        PreviewMouseLeftButtonDown="OnBorderMouseDown"
+        PreviewMouseLeftButtonUp="OnBorderMouseUp"
+        PreviewMouseMove="OnBorderMouseMove"
+        LostMouseCapture="OnBorderLostMouseCapture">
+    <Border x:Name="RootBorder" CornerRadius="16" BorderThickness="0"
             Background="#D9212128"
-            SnapsToDevicePixels="True"
-            MouseLeftButtonDown="OnBorderMouseDown"
-            MouseLeftButtonUp="OnBorderMouseUp"
-            MouseMove="OnBorderMouseMove"
             Loaded="OnRootLoaded">
         <Border.ContextMenu>
             <ContextMenu>
@@ -26,11 +25,7 @@
                 <MenuItem Header="退出" Click="OnQuitClicked"/>
             </ContextMenu>
         </Border.ContextMenu>
-        <Grid Margin="20,10">
-            <Border x:Name="AlbumTint"
-                    Margin="-20,-10"
-                    CornerRadius="16"
-                    IsHitTestVisible="False"/>
+        <Grid Margin="20,12">
             <TextBlock x:Name="PlaceholderNote"
                        Text="♪"
                        FontFamily="Segoe UI Symbol"
@@ -43,8 +38,7 @@
             <StackPanel x:Name="LyricContent"
                         Visibility="Collapsed"
                         HorizontalAlignment="Center"
-                        VerticalAlignment="Center"
-                        MaxWidth="760">
+                        VerticalAlignment="Center">
                 <StackPanel.Effect>
                     <DropShadowEffect Color="#CC000000" BlurRadius="4" ShadowDepth="1" Opacity="0.65"/>
                 </StackPanel.Effect>
@@ -52,18 +46,20 @@
                            Foreground="White"
                            FontWeight="SemiBold"
                            TextAlignment="Center"
-                           TextWrapping="Wrap"
-                           MaxHeight="62"/>
+                           TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis"/>
                 <TextBlock x:Name="RomanizedLine"
                            Margin="0,3,0,0"
                            Foreground="#D1FFFFFF"
                            TextAlignment="Center"
-                           TextWrapping="Wrap"/>
+                           TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis"/>
                 <TextBlock x:Name="TranslatedLine"
                            Margin="0,3,0,0"
                            Foreground="#C7FFFFFF"
                            TextAlignment="Center"
-                           TextWrapping="Wrap"/>
+                           TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis"/>
             </StackPanel>
         </Grid>
     </Border>

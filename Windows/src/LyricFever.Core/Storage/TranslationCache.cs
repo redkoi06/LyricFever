@@ -16,8 +16,8 @@ public sealed record TranslationCacheHit(
     bool RomanizationReady);
 
 /// <summary>
-/// 翻译产物缓存（用户要求：同一首歌再次播放直接读缓存，不重新调用翻译模型）。
-/// 缓存键 = trackID + lyricHash + 源/目标语言 + 模型版本 + 罗马音版本。
+/// 译词产物缓存（同一首歌再次播放直接读已校验的平台人工译词）。
+/// 缓存键 = trackID + lyricHash + 源/目标语言 + 译词策略版本 + 罗马音版本。
 /// 每类产物带 ready 标志：失败结果不得写 ready，也不得覆盖已有有效产物。
 /// </summary>
 public sealed class TranslationCache
@@ -137,6 +137,16 @@ public sealed class TranslationCache
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "DELETE FROM TranslationCache";
         cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>删除早于当前译词策略版本的产物，避免已退役模型的文本继续留在本地数据库。</summary>
+    public int DeleteVersionsOlderThan(int currentVersion)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM TranslationCache WHERE modelVersion < $version";
+        cmd.Parameters.AddWithValue("$version", currentVersion);
+        return cmd.ExecuteNonQuery();
     }
 
     private static List<string> PadToLength(List<string> values, int length)

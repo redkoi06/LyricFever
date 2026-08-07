@@ -68,6 +68,23 @@ public class TranslationCacheTests : IDisposable
     }
 
     [Fact]
+    public void DeleteVersionsOlderThanPurgesRetiredTranslationsOnly()
+    {
+        var cache = MakeCache();
+        var lyrics = Lyrics((1000, "Hello"));
+        cache.Put("old", lyrics, "en", "zh", 1, 1,
+            new List<string> { "retired" }, true, new List<string>(), false);
+        cache.Put("current", lyrics, "en", "zh", 2, 1,
+            new List<string> { "人工译词" }, true, new List<string>(), false);
+
+        var removed = cache.DeleteVersionsOlderThan(2);
+
+        Assert.Equal(1, removed);
+        Assert.Null(cache.Get("old", lyrics, "en", "zh", 1, 1));
+        Assert.NotNull(cache.Get("current", lyrics, "en", "zh", 2, 1));
+    }
+
+    [Fact]
     public void ShortTranslationPaddedToLyricLength()
     {
         var cache = MakeCache();

@@ -32,6 +32,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly LyricSyncEngine _sync = new();
 
     private string? _currentTrackId;
+    private string _requestedTrackIdentity = "";
+    private DateTimeOffset _emptyRetryNotBefore = DateTimeOffset.MinValue;
+    private int _emptyRecoveryAttempt;
     private int _taskVersion;
     private double _lastPositionMs = -1;
     private List<LyricLine>? _currentLyrics;
@@ -117,13 +120,25 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private void OnTrackChanged(MediaTrackInfo track)
     {
-        AppLog.Info("VM", $"track event title={track.Title}; artist={track.Artist}; source={track.AppId}");
         if (string.IsNullOrEmpty(track.Title)) return;
-        // 同曲目跳过（SMTC 重复通知）
-        if (_currentTrackId != null && _lastPositionMs >= 0 &&
-            CurrentTitle == track.Title && CurrentArtist == track.Artist)
-            return;
+        var identity = TrackIdentity(track);
+        var sameRequest = string.Equals(_requestedTrackIdentity, identity, StringComparison.Ordinal);
+        // watchdog 和 SMTC 事件可能同时到达：同一曲目的在途任务不得互相取消重启。
+        if (sameRequest)
+        {
+            if (IsFetching || _currentLyrics is { Count: > 0 }) return;
+            if (DateTimeOffset.UtcNow < _emptyRetryNotBefore) return;
+            AppLog.Info("VM", $"empty lyric watchdog recovery attempt={_emptyRecoveryAttempt + 1}; " +
+                              $"title={track.Title}; artist={track.Artist}");
+        }
+        else
+        {
+            _emptyRecoveryAttempt = 0;
+            _emptyRetryNotBefore = DateTimeOffset.MinValue;
+            AppLog.Info("VM", $"track event title={track.Title}; artist={track.Artist}; source={track.AppId}");
+        }
 
+        _requestedTrackIdentity = identity;
         _ = HandleTrackChangeAsync(track);
     }
 
@@ -164,6 +179,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         CurrentTitle = "";
         CurrentArtist = "";
         CurrentAlbum = "";
+        _requestedTrackIdentity = "";
+        _emptyRecoveryAttempt = 0;
+        _emptyRetryNotBefore = DateTimeOffset.MinValue;
         IsPlaying = false;
         Raise(nameof(IsPlaying));
         RaiseStateChanged();
@@ -210,8 +228,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             var trackId = resolved?.TrackId ?? AlternativeId(track.Title, track.Artist);
 
             // 2. 歌词获取（缓存 → Spotify → LRCLIB → NetEase）
-            var result = await _fetchService.FetchAsync(trackId, track.Title, track.Artist,
-                string.IsNullOrEmpty(track.Album) ? null : track.Album, token);
+            var result = await FetchLyricsWithRetryAsync(trackId, track, version, token);
             token.ThrowIfCancellationRequested();
             if (version != _taskVersion) return;
             AppLog.Info("VM", $"lyrics fetched trackId={trackId}; count={result.Lyrics.Count}");
@@ -220,6 +237,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             _currentTrackId = trackId;
             _currentLyrics = result.Lyrics.Count > 0 ? result.Lyrics : null;
             _sync.Lyrics = _currentLyrics;
+            if (_currentLyrics == null)
+                ScheduleEmptyRecovery();
+            else
+            {
+                _emptyRecoveryAttempt = 0;
+                _emptyRetryNotBefore = DateTimeOffset.MinValue;
+            }
             RaiseStateChanged();
 
             // 4. 翻译/罗马音管线（语言检测 → 产物缓存 → 模型）
@@ -245,6 +269,35 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 RaiseStateChanged();
             }
         }
+    }
+
+    private async Task<LyricFetchResult> FetchLyricsWithRetryAsync(
+        string trackId, MediaTrackInfo track, int version, CancellationToken token)
+    {
+        var delays = new[] { TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3) };
+        LyricFetchResult result = new();
+        for (var attempt = 0; attempt <= delays.Length; attempt++)
+        {
+            result = await _fetchService.FetchAsync(trackId, track.Title, track.Artist,
+                string.IsNullOrEmpty(track.Album) ? null : track.Album, token);
+            token.ThrowIfCancellationRequested();
+            if (version != _taskVersion) throw new OperationCanceledException();
+            if (result.Lyrics.Count > 0) return result;
+            if (attempt == delays.Length) break;
+
+            AppLog.Info("VM", $"lyrics empty; retry={attempt + 1}; title={track.Title}; artist={track.Artist}");
+            await Task.Delay(delays[attempt], token);
+        }
+        return result;
+    }
+
+    private void ScheduleEmptyRecovery()
+    {
+        var delays = new[] { 10, 30, 60 };
+        var seconds = delays[Math.Min(_emptyRecoveryAttempt, delays.Length - 1)];
+        _emptyRecoveryAttempt++;
+        _emptyRetryNotBefore = DateTimeOffset.UtcNow.AddSeconds(seconds);
+        AppLog.Info("VM", $"lyrics remain empty; watchdog retry in {seconds}s");
     }
 
     /// <summary>刷新歌词：与切歌共用同一套"取消→清空→获取→校验→设置→产物"流程。</summary>
@@ -298,6 +351,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         var (translated, romanized) = await _translationPipeline.ProcessAsync(
             trackId, lyrics, lang,
+            CurrentTitle, CurrentArtist, CurrentAlbum,
             AppSettings.Current.TranslateEnabled,
             AppSettings.Current.RomanizationEnabled,
             isCurrent: () => version == _taskVersion && !token.IsCancellationRequested,
@@ -322,6 +376,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes($"{artist}|{title}"));
         return Convert.ToHexString(hash)[..22].ToLowerInvariant();
     }
+
+    private static string TrackIdentity(MediaTrackInfo track) =>
+        $"{track.Title.Trim()}\u001f{track.Artist.Trim()}\u001f{track.Album.Trim()}";
 
     public void Dispose()
     {

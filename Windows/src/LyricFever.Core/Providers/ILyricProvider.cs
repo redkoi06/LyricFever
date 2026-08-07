@@ -22,6 +22,19 @@ public interface ILyricProvider
         CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// 可提供人工校对译词的歌词源。返回值必须与 referenceLyrics 等长；没有可靠匹配时返回 null。
+/// </summary>
+public interface IHumanTranslationProvider
+{
+    Task<IReadOnlyList<string>?> FetchTranslationAsync(
+        string trackName,
+        string? artistName,
+        string? albumName,
+        IReadOnlyList<LyricLine> referenceLyrics,
+        CancellationToken cancellationToken = default);
+}
+
 /// <summary>歌词源类型。</summary>
 public enum LyricProviderType
 {

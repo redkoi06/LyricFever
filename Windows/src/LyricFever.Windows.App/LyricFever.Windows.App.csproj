@@ -17,10 +17,15 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <ApplicationIcon>Assets\LyricFever.ico</ApplicationIcon>
     <AssemblyName>LyricFever</AssemblyName>
     <RootNamespace>LyricFever.Windows.App</RootNamespace>
     <MeCabUseDefaultDictionary>True</MeCabUseDefaultDictionary>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\LyricFeverTray.png" />
+  </ItemGroup>
 
   <!-- LibNMeCab.IpaDicBin 0.10.0 的旧式 targets 在 SDK 项目不生效：
        手动从 NuGet 缓存复制 IPAdic 词典到输出目录（build 与 publish 均复制）。 -->

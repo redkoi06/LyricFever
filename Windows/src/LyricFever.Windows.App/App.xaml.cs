@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using LyricFever.Core.Providers;
 using LyricFever.Core.Providers.Spotify;
@@ -44,10 +45,16 @@ public partial class App : Application
             return;
         }
 
+        RemoveLegacyLocalModels();
+
         // 数据层
         var db = new SqliteDatabase();
         LyricsRepository = new LyricsRepository(db);
         TranslationCache = new TranslationCache(db);
+        var removedTranslations = TranslationCache.DeleteVersionsOlderThan(
+            AppSettings.Current.TranslationModelVersion);
+        if (removedTranslations > 0)
+            AppLog.Info("Translate", $"removed {removedTranslations} retired translation cache entries");
 
         // Spotify 凭据恢复
         var cookie = CredentialStore.Get("spotify.sp_dc");
@@ -55,16 +62,17 @@ public partial class App : Application
 
         // 服务组装
         var trackMapper = new SpotifyTrackMapper(SpotifyProvider, db);
+        var netEaseProvider = new NetEaseLyricProvider();
         var fetchService = new LyricFetchService(LyricsRepository,
-            new ILyricProvider[] { SpotifyProvider, new LrclibLyricProvider(), new NetEaseLyricProvider() });
+            new ILyricProvider[] { SpotifyProvider, new LrclibLyricProvider(), netEaseProvider });
         _watcher = new MediaSessionWatcher
         {
             PreferredPlayer = ParsePlayerPreference(AppSettings.Current.PreferredPlayer)
         };
         var translationPipeline = new TranslationPipelineService(
-            new CTranslate2TranslationProvider(),
             new KawazuRomanizationProvider(),
-            TranslationCache);
+            TranslationCache,
+            netEaseProvider);
 
         MainViewModel = new MainViewModel(_watcher, trackMapper, fetchService, LyricsRepository, translationPipeline);
         _trayIcon = new TrayIconService(MainViewModel);
@@ -81,6 +89,24 @@ public partial class App : Application
         "Any" => MediaPlayerPreference.Any,
         _ => MediaPlayerPreference.AppleMusic
     };
+
+    private static void RemoveLegacyLocalModels()
+    {
+        var path = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "LyricFever", "models");
+        try
+        {
+            if (!Directory.Exists(path)) return;
+            Directory.Delete(path, recursive: true);
+            AppLog.Info("Translate", $"removed retired local model directory: {path}");
+        }
+        catch (Exception ex)
+        {
+            // 清理失败不能阻断人工译词和播放器监听；下次启动继续尝试。
+            AppLog.Error("Translate-Cleanup", ex);
+        }
+    }
 
     protected override void OnExit(ExitEventArgs e)
     {
