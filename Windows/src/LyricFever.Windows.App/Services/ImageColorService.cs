@@ -1,119 +1,85 @@
 using System.IO;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using LyricFever.Core.Appearance;
 
 namespace LyricFever.Windows.App.Services;
 
 /// <summary>
-/// 专辑封面 → 背景色提取（对应 macOS ImageColorGeneration 的简化实现）：
-/// 降采样后扫描像素，优先挑"白字可读的最饱和主色"，否则返回平均色。
+/// Decodes album artwork and delegates palette selection to the platform-independent selector.
+/// Pixels are explicitly converted to BGRA32 so channel order and stride are deterministic.
 /// </summary>
 public static class ImageColorService
 {
-    /// <summary>从图片字节提取背景色。失败时返回 null。</summary>
     public static Color? ExtractDominantColor(byte[] imageData)
     {
+        if (imageData.Length == 0) return null;
+
         try
         {
-            using var ms = new MemoryStream(imageData);
-            var decoder = BitmapDecoder.Create(ms, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+            using var stream = new MemoryStream(imageData);
+            var decoder = BitmapDecoder.Create(
+                stream,
+                BitmapCreateOptions.PreservePixelFormat,
+                BitmapCacheOption.OnLoad);
             var frame = decoder.Frames[0];
 
-            // 降采样到 64x64 内（对应 ColorKit kMeans 的等效效果，开销极低）
-            var scale = Math.Min(Math.Min(64.0 / frame.PixelWidth, 64.0 / frame.PixelHeight), 1.0);
-            var width = Math.Max(1, (int)(frame.PixelWidth * scale));
-            var height = Math.Max(1, (int)(frame.PixelHeight * scale));
-
+            const double maximumSide = 72;
+            var scale = Math.Min(
+                Math.Min(maximumSide / frame.PixelWidth, maximumSide / frame.PixelHeight),
+                1.0);
+            var targetWidth = Math.Max(1, (int)Math.Round(frame.PixelWidth * scale));
+            var targetHeight = Math.Max(1, (int)Math.Round(frame.PixelHeight * scale));
             var resized = new TransformedBitmap(frame, new ScaleTransform(
-                (double)width / frame.PixelWidth, (double)height / frame.PixelHeight));
-            var pixels = new byte[width * height * 4];
-            resized.CopyPixels(pixels, width * 4, 0);
+                (double)targetWidth / frame.PixelWidth,
+                (double)targetHeight / frame.PixelHeight));
 
-            return ComputeLegibleColor(pixels, width, height);
-        }
-        catch
-        {
-            return null;
-        }
-    }
+            var converted = new FormatConvertedBitmap();
+            converted.BeginInit();
+            converted.Source = resized;
+            converted.DestinationFormat = PixelFormats.Bgra32;
+            converted.EndInit();
+            converted.Freeze();
 
-    /// <summary>
-    /// 白字可读颜色：饱和度 ≥ 0.25 且亮度适中（0.2~0.85）的像素中取最饱和的；
-    /// 无候选时返回全图平均色（对应 macOS findWhiteTextLegibleMostSaturatedDominantColor 的简化版）。
-    /// </summary>
-    private static Color ComputeLegibleColor(byte[] pixels, int width, int height)
-    {
-        Color? best = null;
-        double bestSaturation = -1;
-        long rSum = 0, gSum = 0, bSum = 0;
-        var count = 0;
-        var centerX = width / 2.0;
-        var centerY = height / 2.0;
+            var width = converted.PixelWidth;
+            var height = converted.PixelHeight;
+            var stride = width * 4;
+            var pixels = new byte[stride * height];
+            converted.CopyPixels(pixels, stride, 0);
 
-        for (var y = 0; y < height; y++)
-        {
-            for (var x = 0; x < width; x++)
+            var samples = new List<ArtworkColorSample>(width * height);
+            const double farthestCorner = 0.7071067811865476;
+            for (var y = 0; y < height; y++)
             {
-                var i = (y * width + x) * 4;
-                var r = pixels[i];
-                var g = pixels[i + 1];
-                var b = pixels[i + 2];
-                // 忽略 alpha 低的像素
-                if (i + 3 < pixels.Length && pixels[i + 3] < 128) continue;
-
-                rSum += r; gSum += g; bSum += b;
-                count++;
-
-                // 中心区域加权（专辑封面中心通常是主视觉）
-                var dist = Math.Sqrt((x - centerX) * (x - centerX) + (y - centerY) * (y - centerY));
-                var radius = Math.Min(width, height) * 0.5;
-                if (dist > radius) continue;
-
-                var (hue, sat, lum) = RgbToHsl(r, g, b);
-                if (sat >= 0.25 && lum is >= 0.2 and <= 0.85 && sat > bestSaturation)
+                for (var x = 0; x < width; x++)
                 {
-                    bestSaturation = sat;
-                    best = Color.FromRgb(r, g, b);
+                    var offset = y * stride + x * 4;
+                    var alpha = pixels[offset + 3];
+                    if (alpha < 128) continue;
+
+                    // A mild centre bias reflects the visual focus of most covers without
+                    // allowing a small central logo to override the dominant surrounding color.
+                    var normalizedX = (x + 0.5) / width - 0.5;
+                    var normalizedY = (y + 0.5) / height - 0.5;
+                    var distance = Math.Min(1,
+                        Math.Sqrt(normalizedX * normalizedX + normalizedY * normalizedY) / farthestCorner);
+                    var weight = (1 + 0.30 * (1 - distance)) * (alpha / 255.0);
+
+                    samples.Add(new ArtworkColorSample(
+                        Red: pixels[offset + 2],
+                        Green: pixels[offset + 1],
+                        Blue: pixels[offset],
+                        Weight: weight));
                 }
             }
-        }
 
-        if (best.HasValue && count > 0) return best.Value;
-        if (count == 0) return Color.FromRgb(30, 30, 34);
-        return Color.FromRgb((byte)(rSum / count), (byte)(gSum / count), (byte)(bSum / count));
-    }
-
-    /// <summary>RGB → HSL（饱和度/亮度）。</summary>
-    private static (double Hue, double Saturation, double Lightness) RgbToHsl(byte r, byte g, byte b)
-    {
-        var rd = r / 255.0;
-        var gd = g / 255.0;
-        var bd = b / 255.0;
-        var max = Math.Max(rd, Math.Max(gd, bd));
-        var min = Math.Min(rd, Math.Min(gd, bd));
-        var l = (max + min) / 2.0;
-        var d = max - min;
-
-        double h;
-        if (d == 0)
-        {
-            h = 0;
+            var selected = AlbumColorPalette.SelectDominantColor(samples);
+            return Color.FromRgb(selected.Red, selected.Green, selected.Blue);
         }
-        else if (max == rd)
+        catch (Exception ex)
         {
-            h = 60 * (((gd - bd) / d) % 6);
+            AppLog.Error("ArtworkColor", ex);
+            return null;
         }
-        else if (max == gd)
-        {
-            h = 60 * (((bd - rd) / d) + 2);
-        }
-        else
-        {
-            h = 60 * (((rd - gd) / d) + 4);
-        }
-        if (h < 0) h += 360;
-
-        var s = d == 0 ? 0 : d / (1 - Math.Abs(2 * l - 1));
-        return (h, s, l);
     }
 }

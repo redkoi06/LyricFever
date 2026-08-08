@@ -20,6 +20,7 @@ Write-Host "[2/2] verify release files..." -ForegroundColor Cyan
 $required = @(
     "LyricFever.exe",
     "Kawazu.dll",
+    "Assets\Fonts\OFL.txt",
     "IpaDic\char.bin", "IpaDic\matrix.bin", "IpaDic\sys.dic", "IpaDic\unk.dic"
 )
 $missing = @()

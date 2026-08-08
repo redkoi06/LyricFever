@@ -72,6 +72,13 @@ public sealed class LyricFetchService
                     Language = null // provider 未提供语言时由上层检测
                 };
             }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // A provider's HttpClient timeout must not cancel later providers. Only an
+                // explicitly cancelled caller token is allowed to abort the complete chain.
+                System.Diagnostics.Debug.WriteLine(
+                    $"[LyricFever][Fetch] {provider.ProviderName} timed out for {trackName}");
+            }
             catch (OperationCanceledException)
             {
                 throw;

@@ -224,8 +224,21 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
 
             // 1. SMTC 元数据 → Spotify track ID（带 DB 缓存）
-            var resolved = await _trackMapper.ResolveAsync(track.Title, track.Artist,
-                string.IsNullOrEmpty(track.Album) ? null : track.Album, token);
+            SpotifyTrackInfo? resolved;
+            using (var mappingTimeout = CancellationTokenSource.CreateLinkedTokenSource(token))
+            {
+                mappingTimeout.CancelAfter(TimeSpan.FromSeconds(8));
+                try
+                {
+                    resolved = await _trackMapper.ResolveAsync(track.Title, track.Artist,
+                        string.IsNullOrEmpty(track.Album) ? null : track.Album, mappingTimeout.Token);
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested)
+                {
+                    resolved = null;
+                    AppLog.Info("VM", $"Spotify mapping timed out; using metadata fallback; title={track.Title}");
+                }
+            }
             token.ThrowIfCancellationRequested();
             if (version != _taskVersion) return;
 

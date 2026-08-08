@@ -10,12 +10,18 @@
         ShowActivated="False"
         ResizeMode="NoResize"
         Width="520" Height="100"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="Grayscale"
+        TextOptions.TextHintingMode="Fixed"
         WindowStartupLocation="Manual"
         PreviewMouseLeftButtonDown="OnBorderMouseDown"
         PreviewMouseLeftButtonUp="OnBorderMouseUp"
         PreviewMouseMove="OnBorderMouseMove"
         LostMouseCapture="OnBorderLostMouseCapture">
     <Border x:Name="RootBorder" CornerRadius="16" BorderThickness="0"
+            UseLayoutRounding="True" SnapsToDevicePixels="True"
             Background="#D9212128"
             Loaded="OnRootLoaded">
         <Border.ContextMenu>
@@ -25,7 +31,7 @@
                 <MenuItem Header="退出" Click="OnQuitClicked"/>
             </ContextMenu>
         </Border.ContextMenu>
-        <Grid Margin="20,12">
+        <Grid Margin="18,11">
             <TextBlock x:Name="PlaceholderNote"
                        Text="♪"
                        FontFamily="Segoe UI Symbol"
@@ -39,24 +45,29 @@
                         Visibility="Collapsed"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center">
-                <StackPanel.Effect>
-                    <DropShadowEffect Color="#CC000000" BlurRadius="4" ShadowDepth="1" Opacity="0.65"/>
-                </StackPanel.Effect>
                 <TextBlock x:Name="PrimaryLine"
+                           FontFamily="/LyricFever;component/Assets/Fonts/#Noto Sans JP"
                            Foreground="White"
-                           FontWeight="SemiBold"
+                           FontWeight="Medium"
+                           LineStackingStrategy="BlockLineHeight"
                            TextAlignment="Center"
                            TextWrapping="NoWrap"
                            TextTrimming="CharacterEllipsis"/>
                 <TextBlock x:Name="RomanizedLine"
-                           Margin="0,3,0,0"
-                           Foreground="#D1FFFFFF"
+                           Margin="0,7,0,0"
+                           FontFamily="/LyricFever;component/Assets/Fonts/#Noto Sans JP"
+                           Foreground="#F2FFFFFF"
+                           FontWeight="Normal"
+                           LineStackingStrategy="BlockLineHeight"
                            TextAlignment="Center"
                            TextWrapping="NoWrap"
                            TextTrimming="CharacterEllipsis"/>
                 <TextBlock x:Name="TranslatedLine"
-                           Margin="0,3,0,0"
-                           Foreground="#C7FFFFFF"
+                           Margin="0,6,0,0"
+                           FontFamily="Microsoft YaHei UI"
+                           Foreground="#E8FFFFFF"
+                           FontWeight="Normal"
+                           LineStackingStrategy="BlockLineHeight"
                            TextAlignment="Center"
                            TextWrapping="NoWrap"
                            TextTrimming="CharacterEllipsis"/>

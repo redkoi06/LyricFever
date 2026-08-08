@@ -1,6 +1,8 @@
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
+using LyricFever.Core.Appearance;
 using LyricFever.Windows.App.Services;
 using LyricFever.Windows.App.ViewModels;
 
@@ -24,6 +26,8 @@ public partial class KaraokeWindow : Window
     private double _dragDpiScaleY = 1;
     private Point _windowStart;
     private Size? _pendingCardSize;
+    private bool _hasAppliedInitialCardSize;
+    private readonly DispatcherTimer _resizeCommitTimer;
     private VerticalResizeAnchor _verticalResizeAnchor = VerticalResizeAnchor.Top;
 
     public event Action? HideRequested;
@@ -32,6 +36,11 @@ public partial class KaraokeWindow : Window
     {
         InitializeComponent();
         _viewModel = viewModel;
+        _resizeCommitTimer = new DispatcherTimer(DispatcherPriority.Render)
+        {
+            Interval = TimeSpan.FromMilliseconds(75)
+        };
+        _resizeCommitTimer.Tick += OnResizeCommitTimerTick;
 
         // 正常运行不抢焦点；视觉检查模式保留可定位窗口，便于自动截图验收。
         if (App.CurrentApp.IsVisualInspectionMode)
@@ -54,6 +63,8 @@ public partial class KaraokeWindow : Window
             _viewModel.IndexChanged -= OnIndexChanged;
             _viewModel.BackgroundColorChanged -= OnBackgroundColorChanged;
             AppSettings.SettingsChanged -= OnSettingsChanged;
+            _resizeCommitTimer.Stop();
+            _resizeCommitTimer.Tick -= OnResizeCommitTimerTick;
         };
     }
 
@@ -88,13 +99,13 @@ public partial class KaraokeWindow : Window
             ? DisplayableLyric(lyrics[indexValue].Words)
             : null;
 
-        var fontSize = Math.Clamp(AppSettings.Current.KaraokeFontSize, 12, 48);
+        var fontSizes = CreateFontSizes(Math.Clamp(AppSettings.Current.KaraokeFontSize, 12, 48));
         if (primary == null)
         {
-            PlaceholderNote.FontSize = fontSize * 1.4;
+            PlaceholderNote.FontSize = fontSizes.Placeholder;
             PlaceholderNote.Visibility = Visibility.Visible;
             LyricContent.Visibility = Visibility.Collapsed;
-            ResizeCard(fontSize, null, null, null);
+            ResizeCard(fontSizes, null, null, null);
             return;
         }
 
@@ -109,48 +120,65 @@ public partial class KaraokeWindow : Window
             translated = null;
 
         PrimaryLine.Text = primary;
-        PrimaryLine.FontSize = fontSize;
+        PrimaryLine.FontSize = fontSizes.Primary;
+        PrimaryLine.LineHeight = fontSizes.PrimaryLineHeight;
         RomanizedLine.Text = romanized ?? "";
-        RomanizedLine.FontSize = fontSize * 0.70;
+        RomanizedLine.FontSize = fontSizes.Romanized;
+        RomanizedLine.LineHeight = fontSizes.RomanizedLineHeight;
         RomanizedLine.Visibility = romanized == null ? Visibility.Collapsed : Visibility.Visible;
         TranslatedLine.Text = translated ?? "";
-        TranslatedLine.FontSize = fontSize * 0.82;
+        TranslatedLine.FontSize = fontSizes.Translated;
+        TranslatedLine.LineHeight = fontSizes.TranslatedLineHeight;
         TranslatedLine.Visibility = translated == null ? Visibility.Collapsed : Visibility.Visible;
 
         PlaceholderNote.Visibility = Visibility.Collapsed;
         LyricContent.Visibility = Visibility.Visible;
-        ResizeCard(fontSize, primary, romanized, translated);
+        ResizeCard(fontSizes, primary, romanized, translated);
+    }
+
+    private LyricFontSizes CreateFontSizes(double configuredSize)
+    {
+        var dpiScale = Math.Max(0.1, VisualTreeHelper.GetDpi(this).DpiScaleY);
+        double Snap(double value) => Math.Max(1, Math.Round(value * dpiScale) / dpiScale);
+        return new LyricFontSizes(
+            Primary: Snap(configuredSize),
+            Romanized: Snap(configuredSize * 0.68),
+            Translated: Snap(configuredSize * 0.80),
+            Placeholder: Snap(configuredSize * 1.4),
+            PrimaryLineHeight: Snap(configuredSize * 1.30),
+            RomanizedLineHeight: Snap(configuredSize * 0.68 * 1.34),
+            TranslatedLineHeight: Snap(configuredSize * 0.80 * 1.32));
     }
 
     /// <summary>
     /// 根据当前三层文字和字号计算卡片尺寸。每个可见层严格保持单行，卡片宽度
     /// 取日文、罗马音与人工译词中最长一行；只有超过屏幕安全宽度时才截断显示。
     /// </summary>
-    private void ResizeCard(double fontSize, string? primary, string? romanized, string? translated)
+    private void ResizeCard(LyricFontSizes fontSizes, string? primary, string? romanized, string? translated)
     {
         if (!IsLoaded) return;
 
         var workArea = SystemParameters.WorkArea;
-        // XAML 左右各 20、上下各 12，再给边框、阴影和 DPI 像素舍入留出余量。
-        const double horizontalPadding = 42;
-        const double verticalPadding = 30;
+        // XAML 左右各 18、上下各 11，仅保留必要的圆角与 DPI 舍入余量。
+        const double horizontalPadding = 38;
+        const double verticalPadding = 26;
         var maximumContentWidth = Math.Max(220, Math.Min(1060, workArea.Width - 96) - horizontalPadding);
 
         if (primary == null)
         {
-            ApplyCardSize(Math.Clamp(fontSize * 8 + horizontalPadding, 220, 460),
-                Math.Clamp(fontSize * 2.8 + verticalPadding, 72, 170));
+            ApplyCardSize(Math.Clamp(fontSizes.Primary * 6 + horizontalPadding, 140, 300),
+                Math.Clamp(fontSizes.Primary * 2.4 + verticalPadding, 56, 130));
             return;
         }
 
         var rawWidth = Math.Max(
-            MeasureUnwrappedText(primary, PrimaryLine, fontSize).Width,
+            MeasureUnwrappedText(primary, PrimaryLine, fontSizes.Primary).Width,
             Math.Max(
-                MeasureUnwrappedText(romanized, RomanizedLine, fontSize * 0.70).Width,
-                MeasureUnwrappedText(translated, TranslatedLine, fontSize * 0.82).Width));
-        var minimumContentWidth = Math.Clamp(fontSize * 7, 150, 280);
-        // 留半个字号的宽度余量，避免 DPI 取整把最后一个日文字挤到下一行或裁掉。
-        var contentWidth = Math.Clamp(Math.Ceiling(rawWidth + Math.Max(8, fontSize * 0.5)),
+                MeasureUnwrappedText(romanized, RomanizedLine, fontSizes.Romanized).Width,
+                MeasureUnwrappedText(translated, TranslatedLine, fontSizes.Translated).Width));
+        var minimumContentWidth = Math.Clamp(fontSizes.Primary * 5, 80, 220);
+        // 仅留少量字形与 DPI 取整余量，让短句卡片真正贴合最长一行。
+        var contentWidth = Math.Clamp(Math.Ceiling(rawWidth + Math.Max(6, fontSizes.Primary * 0.35)),
             minimumContentWidth, maximumContentWidth);
 
         PrimaryLine.MaxWidth = contentWidth;
@@ -163,9 +191,9 @@ public partial class KaraokeWindow : Window
         LyricContent.Measure(new Size(contentWidth, double.PositiveInfinity));
         var desiredHeight = Math.Ceiling(LyricContent.DesiredSize.Height) + verticalPadding;
 
-        RootBorder.CornerRadius = new CornerRadius(Math.Clamp(10 + fontSize * 0.25, 14, 22));
+        RootBorder.CornerRadius = new CornerRadius(Math.Clamp(10 + fontSizes.Primary * 0.25, 14, 22));
         ApplyCardSize(contentWidth + horizontalPadding,
-            Math.Clamp(desiredHeight, 68, Math.Max(68, workArea.Height - 96)));
+            Math.Clamp(desiredHeight, 46, Math.Max(46, workArea.Height - 96)));
     }
 
     private static Size MeasureUnwrappedText(string? text,
@@ -189,44 +217,75 @@ public partial class KaraokeWindow : Window
 
     private void ApplyCardSize(double newWidth, double newHeight)
     {
+        if (!_hasAppliedInitialCardSize)
+        {
+            _hasAppliedInitialCardSize = true;
+            ApplyCardSizeImmediately(newWidth, newHeight);
+            return;
+        }
+
+        _pendingCardSize = new Size(newWidth, newHeight);
         if (_pointerDown)
         {
             // 歌词可能在拖动过程中切行；延迟改变窗口尺寸，避免鼠标基准与窗口边界同时跳动。
-            _pendingCardSize = new Size(newWidth, newHeight);
+            _resizeCommitTimer.Stop();
             return;
         }
-        ApplyCardSizeImmediately(newWidth, newHeight);
+
+        // LyricsStateChanged can arrive once for the source text and again for derived text.
+        // Coalesce that burst and commit one final geometry update instead of visibly stepping
+        // through two or three intermediate window widths.
+        _resizeCommitTimer.Stop();
+        _resizeCommitTimer.Start();
     }
 
     private void ApplyCardSizeImmediately(double newWidth, double newHeight)
     {
-        if (Math.Abs(Width - newWidth) < 0.5 && Math.Abs(Height - newHeight) < 0.5) return;
+        var dpi = VisualTreeHelper.GetDpi(this);
+        newWidth = SnapToDevicePixel(newWidth, dpi.DpiScaleX);
+        newHeight = SnapToDevicePixel(newHeight, dpi.DpiScaleY);
 
         var oldWidth = ActualWidth > 0 ? ActualWidth : Width;
         var oldHeight = ActualHeight > 0 ? ActualHeight : Height;
-        var oldBottom = Top + oldHeight;
-        var oldCenterX = Left + oldWidth / 2;
-        var oldCenterY = Top + oldHeight / 2;
+        var oldLeft = double.IsNaN(Left) ? SystemParameters.WorkArea.Left : Left;
+        var oldTop = double.IsNaN(Top) ? SystemParameters.WorkArea.Top : Top;
+        var oldBottom = oldTop + oldHeight;
+        var oldCenterX = oldLeft + oldWidth / 2;
+        var oldCenterY = oldTop + oldHeight / 2;
+
+        var targetLeft = SnapToDevicePixel(oldCenterX - newWidth / 2, dpi.DpiScaleX);
+        var targetTop = SnapToDevicePixel(_verticalResizeAnchor switch
+        {
+            VerticalResizeAnchor.Top => oldTop,
+            VerticalResizeAnchor.Bottom => oldBottom - newHeight,
+            _ => oldCenterY - newHeight / 2
+        }, dpi.DpiScaleY);
+        var workArea = SystemParameters.WorkArea;
+        targetLeft = Math.Clamp(targetLeft, workArea.Left, Math.Max(workArea.Left, workArea.Right - newWidth));
+        targetTop = Math.Clamp(targetTop, workArea.Top, Math.Max(workArea.Top, workArea.Bottom - newHeight));
+
+        if (Math.Abs(oldWidth - newWidth) < 0.5 && Math.Abs(oldHeight - newHeight) < 0.5 &&
+            Math.Abs(oldLeft - targetLeft) < 0.5 && Math.Abs(oldTop - targetTop) < 0.5)
+            return;
 
         Width = newWidth;
         Height = newHeight;
-
-        if (!double.IsNaN(Left))
-            Left = oldCenterX - newWidth / 2;
-        if (!double.IsNaN(Top))
-        {
-            Top = _verticalResizeAnchor switch
-            {
-                VerticalResizeAnchor.Top => Top,
-                VerticalResizeAnchor.Bottom => oldBottom - newHeight,
-                _ => oldCenterY - newHeight / 2
-            };
-        }
-        KeepInsideWorkArea();
+        Left = targetLeft;
+        Top = targetTop;
     }
+
+    private void OnResizeCommitTimerTick(object? sender, EventArgs e)
+    {
+        _resizeCommitTimer.Stop();
+        if (!_pointerDown) ApplyPendingCardSize();
+    }
+
+    private static double SnapToDevicePixel(double value, double dpiScale) =>
+        Math.Round(value * Math.Max(0.1, dpiScale)) / Math.Max(0.1, dpiScale);
 
     private void ApplyPendingCardSize()
     {
+        _resizeCommitTimer.Stop();
         if (_pendingCardSize is not { } pending) return;
         _pendingCardSize = null;
         ApplyCardSizeImmediately(pending.Width, pending.Height);
@@ -252,23 +311,13 @@ public partial class KaraokeWindow : Window
         var requestedColor = AppSettings.Current.KaraokeUseBackgroundColor
             ? color
             : Color.FromRgb(45, 60, 204);
-        var baseColor = EnsureDarkBackground(requestedColor);
-        RootBorder.Background = new SolidColorBrush(Color.FromArgb(
-            (byte)Math.Round(255 * opacity), baseColor.R, baseColor.G, baseColor.B));
-    }
-
-    private static Color EnsureDarkBackground(Color color)
-    {
-        // 专辑主色可能接近白色或亮黄色；压到稳定的深色亮度，保证三层白字和阴影可读。
-        const double maximumLuma = 48;
-        var luma = color.R * 0.2126 + color.G * 0.7152 + color.B * 0.0722;
-        if (luma <= maximumLuma) return Color.FromRgb(color.R, color.G, color.B);
-
-        var scale = maximumLuma / luma;
-        return Color.FromRgb(
-            (byte)Math.Round(color.R * scale),
-            (byte)Math.Round(color.G * scale),
-            (byte)Math.Round(color.B * scale));
+        var legible = AlbumColorPalette.NormalizeForWhiteText(
+            new ArtworkColor(requestedColor.R, requestedColor.G, requestedColor.B),
+            opacity);
+        var brush = new SolidColorBrush(Color.FromArgb(
+            (byte)Math.Round(255 * opacity), legible.Red, legible.Green, legible.Blue));
+        brush.Freeze();
+        RootBorder.Background = brush;
     }
 
     // ---- 拖动（NOACTIVATE 窗口不能用 DragMove，手动实现） ----
@@ -276,6 +325,7 @@ public partial class KaraokeWindow : Window
     private void OnBorderMouseDown(object sender, MouseButtonEventArgs e)
     {
         if (e.ChangedButton != MouseButton.Left) return;
+        _resizeCommitTimer.Stop();
         _pointerDown = true;
         _dragging = false;
         if (!GetCursorPos(out _dragStartScreen))
@@ -459,4 +509,13 @@ public partial class KaraokeWindow : Window
         Center,
         Bottom
     }
+
+    private readonly record struct LyricFontSizes(
+        double Primary,
+        double Romanized,
+        double Translated,
+        double Placeholder,
+        double PrimaryLineHeight,
+        double RomanizedLineHeight,
+        double TranslatedLineHeight);
 }

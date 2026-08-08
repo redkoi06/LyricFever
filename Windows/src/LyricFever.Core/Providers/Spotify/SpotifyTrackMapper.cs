@@ -43,6 +43,13 @@ public sealed class SpotifyTrackMapper
         {
             result = await _provider.SearchSpotifyTrackAsync(searchTerm, cancellationToken);
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // HttpClient timeouts also surface as OperationCanceledException. They mean this
+            // provider failed, not that the caller abandoned the whole lyric fallback chain.
+            System.Diagnostics.Debug.WriteLine("[LyricFever][TrackMap] search timed out; using metadata fallback");
+            return null;
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             System.Diagnostics.Debug.WriteLine($"[LyricFever][TrackMap] search failed: {ex.Message}");

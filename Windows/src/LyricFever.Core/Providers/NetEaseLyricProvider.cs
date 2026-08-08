@@ -140,7 +140,7 @@ public sealed class NetEaseLyricProvider : ILyricProvider, IHumanTranslationProv
         return search?.Result?.Songs ?? new List<NetEaseSong>();
     }
 
-    private static Task<NetEaseLyrics?> FetchLyricsDataAsync(int songId, CancellationToken cancellationToken) =>
+    private static Task<NetEaseLyrics?> FetchLyricsDataAsync(long songId, CancellationToken cancellationToken) =>
         Http.GetFromJsonAsync<NetEaseLyrics>(
             $"{Host}/api/song/lyric?id={songId}&lv=1&kv=1&tv=1", cancellationToken);
 
@@ -358,7 +358,7 @@ public sealed class NetEaseSong
     public string Name { get; set; } = "";
 
     [JsonPropertyName("id")]
-    public int Id { get; set; }
+    public long Id { get; set; }
 
     [JsonPropertyName("duration")]
     public int Duration { get; set; }

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using LyricFever.Core.Lyrics;
 using LyricFever.Core.Providers;
 
@@ -5,6 +6,21 @@ namespace LyricFever.Core.Tests;
 
 public sealed class NetEaseLyricProviderTests
 {
+    [Fact]
+    public void SearchResponse_AcceptsSongIdsLargerThanInt32()
+    {
+        const string json = """
+            { "code": 200, "result": { "songCount": 1, "songs": [
+              { "id": 3000000000, "name": "Future Song", "duration": 180000,
+                "album": { "name": "Album" }, "artists": [ { "name": "Artist" } ] }
+            ] } }
+            """;
+
+        var response = JsonSerializer.Deserialize<NetEaseSearch>(json);
+
+        Assert.Equal(3_000_000_000L, response?.Result?.Songs?[0].Id);
+    }
+
     [Fact]
     public void AlignTranslations_MergesPlatformSplitLinesIntoReferenceInterval()
     {
@@ -158,7 +174,7 @@ public sealed class NetEaseLyricProviderTests
             bundle.SourceLyrics, bundle.TranslatedLyrics));
     }
 
-    private static NetEaseSong Song(string title, string artist, string album, int id) => new()
+    private static NetEaseSong Song(string title, string artist, string album, long id) => new()
     {
         Id = id,
         Name = title,
