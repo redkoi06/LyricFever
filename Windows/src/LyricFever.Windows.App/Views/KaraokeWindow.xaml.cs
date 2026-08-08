@@ -17,6 +17,9 @@ public partial class KaraokeWindow : Window
 {
     private const int WsExNoActivate = 0x08000000;
     private const int GwExStyle = -20;
+    private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpNoActivate = 0x0010;
+    private const uint SwpNoOwnerZOrder = 0x0200;
 
     private readonly MainViewModel _viewModel;
     private bool _pointerDown;
@@ -25,7 +28,7 @@ public partial class KaraokeWindow : Window
     private double _dragDpiScaleX = 1;
     private double _dragDpiScaleY = 1;
     private Point _windowStart;
-    private Size? _pendingCardSize;
+    private LyricRenderSnapshot? _pendingLyricRender;
     private bool _hasAppliedInitialCardSize;
     private readonly DispatcherTimer _resizeCommitTimer;
     private VerticalResizeAnchor _verticalResizeAnchor = VerticalResizeAnchor.Top;
@@ -102,10 +105,7 @@ public partial class KaraokeWindow : Window
         var fontSizes = CreateFontSizes(Math.Clamp(AppSettings.Current.KaraokeFontSize, 12, 48));
         if (primary == null)
         {
-            PlaceholderNote.FontSize = fontSizes.Placeholder;
-            PlaceholderNote.Visibility = Visibility.Visible;
-            LyricContent.Visibility = Visibility.Collapsed;
-            ResizeCard(fontSizes, null, null, null);
+            QueueLyricRender(new LyricRenderSnapshot(fontSizes, null, null, null));
             return;
         }
 
@@ -119,21 +119,75 @@ public partial class KaraokeWindow : Window
         if (string.Equals(primary, translated, StringComparison.OrdinalIgnoreCase))
             translated = null;
 
-        PrimaryLine.Text = primary;
+        QueueLyricRender(new LyricRenderSnapshot(fontSizes, primary, romanized, translated));
+    }
+
+    private void QueueLyricRender(LyricRenderSnapshot snapshot)
+    {
+        _pendingLyricRender = snapshot;
+        if (!IsLoaded) return;
+
+        if (!_hasAppliedInitialCardSize)
+        {
+            CommitPendingLyricRender();
+            return;
+        }
+
+        if (_pointerDown)
+        {
+            // 歌词可能在拖动过程中切行；延迟整个视觉快照，避免文字或窗口边界单独跳动。
+            _resizeCommitTimer.Stop();
+            return;
+        }
+
+        // Source text and derived lines can notify separately. Keep the old text and old card
+        // together while coalescing, then replace both from the last complete snapshot.
+        _resizeCommitTimer.Stop();
+        _resizeCommitTimer.Start();
+    }
+
+    private void CommitPendingLyricRender()
+    {
+        _resizeCommitTimer.Stop();
+        if (_pendingLyricRender is not { } snapshot) return;
+        _pendingLyricRender = null;
+
+        var layout = CalculateCardLayout(snapshot.FontSizes,
+            snapshot.Primary, snapshot.Romanized, snapshot.Translated);
+        ApplyLyricVisuals(snapshot, layout);
+        _hasAppliedInitialCardSize = true;
+        ApplyCardSizeImmediately(layout.Width, layout.Height);
+    }
+
+    private void ApplyLyricVisuals(LyricRenderSnapshot snapshot, LyricCardLayout layout)
+    {
+        var fontSizes = snapshot.FontSizes;
+        RootBorder.CornerRadius = new CornerRadius(layout.CornerRadius);
+        if (snapshot.Primary == null)
+        {
+            PlaceholderNote.FontSize = fontSizes.Placeholder;
+            PlaceholderNote.Visibility = Visibility.Visible;
+            LyricContent.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        PrimaryLine.Text = snapshot.Primary;
         PrimaryLine.FontSize = fontSizes.Primary;
         PrimaryLine.LineHeight = fontSizes.PrimaryLineHeight;
-        RomanizedLine.Text = romanized ?? "";
+        RomanizedLine.Text = snapshot.Romanized ?? "";
         RomanizedLine.FontSize = fontSizes.Romanized;
         RomanizedLine.LineHeight = fontSizes.RomanizedLineHeight;
-        RomanizedLine.Visibility = romanized == null ? Visibility.Collapsed : Visibility.Visible;
-        TranslatedLine.Text = translated ?? "";
+        RomanizedLine.Visibility = snapshot.Romanized == null ? Visibility.Collapsed : Visibility.Visible;
+        TranslatedLine.Text = snapshot.Translated ?? "";
         TranslatedLine.FontSize = fontSizes.Translated;
         TranslatedLine.LineHeight = fontSizes.TranslatedLineHeight;
-        TranslatedLine.Visibility = translated == null ? Visibility.Collapsed : Visibility.Visible;
+        TranslatedLine.Visibility = snapshot.Translated == null ? Visibility.Collapsed : Visibility.Visible;
+        PrimaryLine.MaxWidth = layout.ContentWidth;
+        RomanizedLine.MaxWidth = layout.ContentWidth;
+        TranslatedLine.MaxWidth = layout.ContentWidth;
 
         PlaceholderNote.Visibility = Visibility.Collapsed;
         LyricContent.Visibility = Visibility.Visible;
-        ResizeCard(fontSizes, primary, romanized, translated);
     }
 
     private LyricFontSizes CreateFontSizes(double configuredSize)
@@ -154,10 +208,9 @@ public partial class KaraokeWindow : Window
     /// 根据当前三层文字和字号计算卡片尺寸。每个可见层严格保持单行，卡片宽度
     /// 取日文、罗马音与人工译词中最长一行；只有超过屏幕安全宽度时才截断显示。
     /// </summary>
-    private void ResizeCard(LyricFontSizes fontSizes, string? primary, string? romanized, string? translated)
+    private LyricCardLayout CalculateCardLayout(LyricFontSizes fontSizes,
+        string? primary, string? romanized, string? translated)
     {
-        if (!IsLoaded) return;
-
         var workArea = SystemParameters.WorkArea;
         // XAML 左右各 18、上下各 11，仅保留必要的圆角与 DPI 舍入余量。
         const double horizontalPadding = 38;
@@ -166,9 +219,11 @@ public partial class KaraokeWindow : Window
 
         if (primary == null)
         {
-            ApplyCardSize(Math.Clamp(fontSizes.Primary * 6 + horizontalPadding, 140, 300),
-                Math.Clamp(fontSizes.Primary * 2.4 + verticalPadding, 56, 130));
-            return;
+            return new LyricCardLayout(
+                Math.Clamp(fontSizes.Primary * 6 + horizontalPadding, 140, 300),
+                Math.Clamp(fontSizes.Primary * 2.4 + verticalPadding, 56, 130),
+                0,
+                Math.Clamp(10 + fontSizes.Primary * 0.25, 14, 22));
         }
 
         var rawWidth = Math.Max(
@@ -181,19 +236,19 @@ public partial class KaraokeWindow : Window
         var contentWidth = Math.Clamp(Math.Ceiling(rawWidth + Math.Max(6, fontSizes.Primary * 0.35)),
             minimumContentWidth, maximumContentWidth);
 
-        PrimaryLine.MaxWidth = contentWidth;
-        RomanizedLine.MaxWidth = contentWidth;
-        TranslatedLine.MaxWidth = contentWidth;
+        // Every visible TextBlock uses BlockLineHeight and NoWrap, so its final height is known
+        // without mutating or measuring the live visual tree. Measuring offscreen first prevents
+        // the Japanese source line from becoming visible one frame before the card geometry.
+        var contentHeight = fontSizes.PrimaryLineHeight;
+        if (romanized != null) contentHeight += 7 + fontSizes.RomanizedLineHeight;
+        if (translated != null) contentHeight += 6 + fontSizes.TranslatedLineHeight;
+        var desiredHeight = Math.Ceiling(contentHeight) + verticalPadding;
 
-        // 使用真实 TextBlock 布局高度，包含字体 fallback、三层 Margin 与系统 DPI；
-        // 这比单独的 FormattedText 更能避免底部人工译词被窗口边界裁切。
-        LyricContent.InvalidateMeasure();
-        LyricContent.Measure(new Size(contentWidth, double.PositiveInfinity));
-        var desiredHeight = Math.Ceiling(LyricContent.DesiredSize.Height) + verticalPadding;
-
-        RootBorder.CornerRadius = new CornerRadius(Math.Clamp(10 + fontSizes.Primary * 0.25, 14, 22));
-        ApplyCardSize(contentWidth + horizontalPadding,
-            Math.Clamp(desiredHeight, 46, Math.Max(46, workArea.Height - 96)));
+        return new LyricCardLayout(
+            contentWidth + horizontalPadding,
+            Math.Clamp(desiredHeight, 46, Math.Max(46, workArea.Height - 96)),
+            contentWidth,
+            Math.Clamp(10 + fontSizes.Primary * 0.25, 14, 22));
     }
 
     private static Size MeasureUnwrappedText(string? text,
@@ -213,30 +268,6 @@ public partial class KaraokeWindow : Window
         };
         probe.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         return probe.DesiredSize;
-    }
-
-    private void ApplyCardSize(double newWidth, double newHeight)
-    {
-        if (!_hasAppliedInitialCardSize)
-        {
-            _hasAppliedInitialCardSize = true;
-            ApplyCardSizeImmediately(newWidth, newHeight);
-            return;
-        }
-
-        _pendingCardSize = new Size(newWidth, newHeight);
-        if (_pointerDown)
-        {
-            // 歌词可能在拖动过程中切行；延迟改变窗口尺寸，避免鼠标基准与窗口边界同时跳动。
-            _resizeCommitTimer.Stop();
-            return;
-        }
-
-        // LyricsStateChanged can arrive once for the source text and again for derived text.
-        // Coalesce that burst and commit one final geometry update instead of visibly stepping
-        // through two or three intermediate window widths.
-        _resizeCommitTimer.Stop();
-        _resizeCommitTimer.Start();
     }
 
     private void ApplyCardSizeImmediately(double newWidth, double newHeight)
@@ -268,28 +299,60 @@ public partial class KaraokeWindow : Window
             Math.Abs(oldLeft - targetLeft) < 0.5 && Math.Abs(oldTop - targetTop) < 0.5)
             return;
 
-        Width = newWidth;
-        Height = newHeight;
-        Left = targetLeft;
-        Top = targetTop;
+        ApplyWindowGeometryAtomically(
+            oldLeft, oldTop,
+            targetLeft, targetTop,
+            newWidth, newHeight,
+            dpi.DpiScaleX, dpi.DpiScaleY);
+    }
+
+    private void ApplyWindowGeometryAtomically(
+        double oldLeft, double oldTop,
+        double targetLeft, double targetTop,
+        double targetWidth, double targetHeight,
+        double dpiScaleX, double dpiScaleY)
+    {
+        var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        var appliedNatively = false;
+        if (handle != IntPtr.Zero && GetWindowRect(handle, out var currentRect))
+        {
+            // Setting Width/Height/Left/Top separately lets WPF issue multiple HWND moves.
+            // On a 60-Hz desktop those operations can land in adjacent frames, so a line whose
+            // Japanese text determines the width visibly passes through intermediate geometry.
+            // Derive the physical target from the current native rect and commit all four values
+            // in one SetWindowPos call.
+            var nativeLeft = currentRect.Left + ToDevicePixels(targetLeft - oldLeft, dpiScaleX);
+            var nativeTop = currentRect.Top + ToDevicePixels(targetTop - oldTop, dpiScaleY);
+            var nativeWidth = Math.Max(1, ToDevicePixels(targetWidth, dpiScaleX));
+            var nativeHeight = Math.Max(1, ToDevicePixels(targetHeight, dpiScaleY));
+            appliedNatively = SetWindowPos(handle, IntPtr.Zero,
+                nativeLeft, nativeTop, nativeWidth, nativeHeight,
+                SwpNoZOrder | SwpNoActivate | SwpNoOwnerZOrder);
+        }
+
+        // Keep WPF dependency properties synchronized with the native rectangle. When the native
+        // call succeeded these assignments target the already-current rectangle and cannot expose
+        // the old width-first sequence; the fallback preserves resizing if Win32 rejects the call.
+        SetCurrentValue(WidthProperty, targetWidth);
+        SetCurrentValue(HeightProperty, targetHeight);
+        SetCurrentValue(LeftProperty, targetLeft);
+        SetCurrentValue(TopProperty, targetTop);
+
+        if (!appliedNatively)
+            AppLog.Info("Layout", "atomic window geometry unavailable; used WPF fallback");
     }
 
     private void OnResizeCommitTimerTick(object? sender, EventArgs e)
     {
         _resizeCommitTimer.Stop();
-        if (!_pointerDown) ApplyPendingCardSize();
+        if (!_pointerDown) CommitPendingLyricRender();
     }
 
     private static double SnapToDevicePixel(double value, double dpiScale) =>
         Math.Round(value * Math.Max(0.1, dpiScale)) / Math.Max(0.1, dpiScale);
 
-    private void ApplyPendingCardSize()
-    {
-        _resizeCommitTimer.Stop();
-        if (_pendingCardSize is not { } pending) return;
-        _pendingCardSize = null;
-        ApplyCardSizeImmediately(pending.Width, pending.Height);
-    }
+    private static int ToDevicePixels(double value, double dpiScale) =>
+        (int)Math.Round(value * Math.Max(0.1, dpiScale), MidpointRounding.AwayFromZero);
 
     private static string? DisplayableLyric(string? value)
     {
@@ -374,7 +437,7 @@ public partial class KaraokeWindow : Window
         _pointerDown = false;
         _dragging = false;
         if (IsMouseCaptured) ReleaseMouseCapture();
-        ApplyPendingCardSize();
+        CommitPendingLyricRender();
         if (!didDrag)
         {
             e.Handled = true;
@@ -397,7 +460,7 @@ public partial class KaraokeWindow : Window
         _pointerDown = false;
         _dragging = false;
         if (IsMouseCaptured) ReleaseMouseCapture();
-        ApplyPendingCardSize();
+        CommitPendingLyricRender();
     }
 
     private void OnBorderLostMouseCapture(object sender, MouseEventArgs e)
@@ -494,6 +557,15 @@ public partial class KaraokeWindow : Window
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
+        int x, int y, int width, int height, uint flags);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool GetWindowRect(IntPtr hWnd, out NativeRect rect);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
     private static extern bool GetCursorPos(out NativePoint point);
 
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
@@ -501,6 +573,15 @@ public partial class KaraokeWindow : Window
     {
         public int X;
         public int Y;
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
     }
 
     private enum VerticalResizeAnchor
@@ -518,4 +599,16 @@ public partial class KaraokeWindow : Window
         double PrimaryLineHeight,
         double RomanizedLineHeight,
         double TranslatedLineHeight);
+
+    private readonly record struct LyricRenderSnapshot(
+        LyricFontSizes FontSizes,
+        string? Primary,
+        string? Romanized,
+        string? Translated);
+
+    private readonly record struct LyricCardLayout(
+        double Width,
+        double Height,
+        double ContentWidth,
+        double CornerRadius);
 }
