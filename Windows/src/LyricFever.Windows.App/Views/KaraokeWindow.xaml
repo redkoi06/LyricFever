@@ -23,12 +23,32 @@
     <Border x:Name="RootBorder" CornerRadius="16" BorderThickness="0"
             UseLayoutRounding="True" SnapsToDevicePixels="True"
             Background="#D9212128"
-            Loaded="OnRootLoaded">
+        Loaded="OnRootLoaded">
         <Border.ContextMenu>
-            <ContextMenu>
-                <MenuItem Header="隐藏歌词窗口" Click="OnHideClicked"/>
-                <MenuItem Header="设置" Click="OnSettingsClicked"/>
-                <MenuItem Header="退出" Click="OnQuitClicked"/>
+            <ContextMenu Style="{StaticResource TrayContextMenuStyle}">
+                <ContextMenu.Resources>
+                    <Style TargetType="{x:Type MenuItem}" BasedOn="{StaticResource TrayMenuItemStyle}"/>
+                    <Style TargetType="{x:Type Separator}" BasedOn="{StaticResource TraySeparatorStyle}"/>
+                </ContextMenu.Resources>
+                <MenuItem Header="隐藏歌词窗口" Click="OnHideClicked">
+                    <MenuItem.Icon>
+                        <TextBlock Text="&#xE890;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                   FontSize="15" Foreground="{StaticResource TextSecondaryBrush}"/>
+                    </MenuItem.Icon>
+                </MenuItem>
+                <MenuItem Header="设置" Click="OnSettingsClicked">
+                    <MenuItem.Icon>
+                        <TextBlock Text="&#xE713;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                   FontSize="15" Foreground="{StaticResource TextSecondaryBrush}"/>
+                    </MenuItem.Icon>
+                </MenuItem>
+                <Separator/>
+                <MenuItem Header="退出 Lyric Fever" Click="OnQuitClicked">
+                    <MenuItem.Icon>
+                        <TextBlock Text="&#xE7E8;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                   FontSize="15" Foreground="{StaticResource TextSecondaryBrush}"/>
+                    </MenuItem.Icon>
+                </MenuItem>
             </ContextMenu>
         </Border.ContextMenu>
         <Grid Margin="18,11">

@@ -31,6 +31,9 @@ public partial class KaraokeWindow : Window
     private LyricRenderSnapshot? _pendingLyricRender;
     private bool _hasAppliedInitialCardSize;
     private readonly DispatcherTimer _resizeCommitTimer;
+    private readonly DispatcherTimer _settingsApplyTimer;
+    private bool _settingsNeedsLayout;
+    private bool _settingsNeedsBackground;
     private VerticalResizeAnchor _verticalResizeAnchor = VerticalResizeAnchor.Top;
 
     public event Action? HideRequested;
@@ -44,6 +47,11 @@ public partial class KaraokeWindow : Window
             Interval = TimeSpan.FromMilliseconds(75)
         };
         _resizeCommitTimer.Tick += OnResizeCommitTimerTick;
+        _settingsApplyTimer = new DispatcherTimer(DispatcherPriority.Render)
+        {
+            Interval = TimeSpan.FromMilliseconds(16)
+        };
+        _settingsApplyTimer.Tick += OnSettingsApplyTimerTick;
 
         // 正常运行不抢焦点；视觉检查模式保留可定位窗口，便于自动截图验收。
         if (App.CurrentApp.IsVisualInspectionMode)
@@ -68,6 +76,8 @@ public partial class KaraokeWindow : Window
             AppSettings.SettingsChanged -= OnSettingsChanged;
             _resizeCommitTimer.Stop();
             _resizeCommitTimer.Tick -= OnResizeCommitTimerTick;
+            _settingsApplyTimer.Stop();
+            _settingsApplyTimer.Tick -= OnSettingsApplyTimerTick;
         };
     }
 
@@ -84,13 +94,51 @@ public partial class KaraokeWindow : Window
 
     private void OnIndexChanged() => Dispatcher.Invoke(RenderCurrentLyric);
 
-    private void OnSettingsChanged()
+    private void OnSettingsChanged(string? propertyName)
     {
-        Dispatcher.Invoke(() =>
+        if (!Dispatcher.CheckAccess())
         {
-            RenderCurrentLyric();
-            ApplyBackground(_viewModel.BackgroundColor);
-        });
+            Dispatcher.BeginInvoke(() => QueueSettingsUpdate(propertyName));
+            return;
+        }
+
+        QueueSettingsUpdate(propertyName);
+    }
+
+    private void QueueSettingsUpdate(string? propertyName)
+    {
+        switch (propertyName)
+        {
+            case nameof(AppSettings.KaraokeOpacity):
+            case nameof(AppSettings.KaraokeUseBackgroundColor):
+                _settingsNeedsBackground = true;
+                break;
+            case nameof(AppSettings.KaraokeFontSize):
+            case nameof(AppSettings.TranslateEnabled):
+            case nameof(AppSettings.RomanizationEnabled):
+                _settingsNeedsLayout = true;
+                break;
+            case null:
+                _settingsNeedsLayout = true;
+                _settingsNeedsBackground = true;
+                break;
+            default:
+                return;
+        }
+
+        if (!_settingsApplyTimer.IsEnabled) _settingsApplyTimer.Start();
+    }
+
+    private void OnSettingsApplyTimerTick(object? sender, EventArgs e)
+    {
+        _settingsApplyTimer.Stop();
+        var updateLayout = _settingsNeedsLayout;
+        var updateBackground = _settingsNeedsBackground;
+        _settingsNeedsLayout = false;
+        _settingsNeedsBackground = false;
+
+        if (updateLayout) RenderCurrentLyric();
+        if (updateBackground) ApplyBackground(_viewModel.BackgroundColor);
     }
 
     private void RenderCurrentLyric()
@@ -370,7 +418,7 @@ public partial class KaraokeWindow : Window
 
     private void ApplyBackground(Color color)
     {
-        var opacity = Math.Clamp(AppSettings.Current.KaraokeOpacity, 0.78, 1.0);
+        var opacity = Math.Clamp(AppSettings.Current.KaraokeOpacity, 0.5, 1.0);
         var requestedColor = AppSettings.Current.KaraokeUseBackgroundColor
             ? color
             : Color.FromRgb(45, 60, 204);
@@ -449,7 +497,7 @@ public partial class KaraokeWindow : Window
         AppSettings.Current.KaraokeLeft = Left;
         AppSettings.Current.KaraokeTop = Top;
         AppSettings.Current.KaraokeCenterX = Left + Width / 2;
-        AppSettings.Current.Save();
+        AppSettings.Current.Save(notifyListeners: false);
         AppLog.Info("Drag", $"drag completed; left={Left:F1}; top={Top:F1}; " +
                             $"centerX={AppSettings.Current.KaraokeCenterX:F1}");
         e.Handled = true;

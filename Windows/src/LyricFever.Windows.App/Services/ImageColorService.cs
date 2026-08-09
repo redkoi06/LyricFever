@@ -74,6 +74,8 @@ public static class ImageColorService
             }
 
             var selected = AlbumColorPalette.SelectDominantColor(samples);
+            AppLog.Info("ArtworkColor",
+                $"selected=#{selected.Red:X2}{selected.Green:X2}{selected.Blue:X2}; samples={samples.Count}");
             return Color.FromRgb(selected.Red, selected.Green, selected.Blue);
         }
         catch (Exception ex)

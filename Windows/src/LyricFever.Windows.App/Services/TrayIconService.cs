@@ -20,6 +20,9 @@ public sealed class TrayIconService : IDisposable
     private TaskbarIcon? _trayIcon;
     private SettingsWindow? _settingsWindow;
     private KaraokeWindow? _karaokeWindow;
+    private MenuItem? _lyricsMenuItem;
+    private MenuItem? _refreshMenuItem;
+    private TextBlock? _trayStatusText;
     private readonly DispatcherTimer _hideDelayTimer;
     private bool _userWantsLyricsWindow = true;
     private bool? _lastWindowVisibility;
@@ -44,6 +47,7 @@ public sealed class TrayIconService : IDisposable
         };
         _trayIcon.TrayLeftMouseUp += (_, _) => ToggleLyricsWindow();
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        UpdateTrayPresentation();
         SyncLyricsWindowVisibility();
     }
 
@@ -56,20 +60,26 @@ public sealed class TrayIconService : IDisposable
     private void ToggleLyricsWindow()
     {
         _userWantsLyricsWindow = !_userWantsLyricsWindow;
+        UpdateTrayPresentation();
         SyncLyricsWindowVisibility();
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is not (nameof(MainViewModel.IsPlaying) or nameof(MainViewModel.HasMediaSession)))
+        if (e.PropertyName is not (nameof(MainViewModel.IsPlaying) or
+            nameof(MainViewModel.HasMediaSession) or nameof(MainViewModel.IsFetching)))
             return;
-        Application.Current.Dispatcher.BeginInvoke(SyncLyricsWindowVisibility);
+        Application.Current.Dispatcher.BeginInvoke(() =>
+        {
+            UpdateTrayPresentation();
+            if (e.PropertyName is nameof(MainViewModel.IsPlaying) or nameof(MainViewModel.HasMediaSession))
+                SyncLyricsWindowVisibility();
+        });
     }
 
     private void SyncLyricsWindowVisibility()
     {
-        var shouldShow = App.CurrentApp.IsVisualInspectionMode ||
-                          (_userWantsLyricsWindow && _viewModel.HasMediaSession && _viewModel.IsPlaying);
+        var shouldShow = _userWantsLyricsWindow && _viewModel.HasMediaSession && _viewModel.IsPlaying;
 
         if (shouldShow)
         {
@@ -98,8 +108,7 @@ public sealed class TrayIconService : IDisposable
     private void OnHideDelayElapsed(object? sender, EventArgs e)
     {
         _hideDelayTimer.Stop();
-        var shouldShow = App.CurrentApp.IsVisualInspectionMode ||
-                         (_userWantsLyricsWindow && _viewModel.HasMediaSession && _viewModel.IsPlaying);
+        var shouldShow = _userWantsLyricsWindow && _viewModel.HasMediaSession && _viewModel.IsPlaying;
         ApplyLyricsWindowVisibility(shouldShow);
     }
 
@@ -108,8 +117,7 @@ public sealed class TrayIconService : IDisposable
         if (_lastWindowVisibility != shouldShow)
         {
             AppLog.Info("Tray", $"lyricsWindowVisible={shouldShow}; userEnabled={_userWantsLyricsWindow}; " +
-                                $"hasSession={_viewModel.HasMediaSession}; isPlaying={_viewModel.IsPlaying}; " +
-                                $"visualInspection={App.CurrentApp.IsVisualInspectionMode}");
+                                $"hasSession={_viewModel.HasMediaSession}; isPlaying={_viewModel.IsPlaying}");
             _lastWindowVisibility = shouldShow;
         }
         if (!shouldShow)
@@ -143,58 +151,138 @@ public sealed class TrayIconService : IDisposable
 
     private void ToggleSettingsWindow()
     {
+        if (_settingsWindow?.IsVisible == true)
+        {
+            _settingsWindow.Hide();
+            return;
+        }
+
+        ShowSettingsWindow();
+    }
+
+    public void ShowSettingsWindow()
+    {
         if (_settingsWindow == null)
         {
             _settingsWindow = new SettingsWindow();
             _settingsWindow.Closed += (_, _) => _settingsWindow = null;
-            _settingsWindow.Show();
         }
-        else if (_settingsWindow.IsVisible)
-        {
-            _settingsWindow.Hide();
-        }
-        else
-        {
-            _settingsWindow.Show();
-            _settingsWindow.Activate();
-        }
+        if (!_settingsWindow.IsVisible) _settingsWindow.Show();
+        _settingsWindow.Activate();
     }
 
     private ContextMenu CreateContextMenu()
     {
-        var menu = new ContextMenu();
+        var menuItemStyle = (Style)Application.Current.FindResource("TrayMenuItemStyle");
+        var separatorStyle = (Style)Application.Current.FindResource("TraySeparatorStyle");
+        var menu = new ContextMenu
+        {
+            Style = (Style)Application.Current.FindResource("TrayContextMenuStyle")
+        };
 
-        var lyrics = new MenuItem { Header = "显示歌词窗口" };
-        lyrics.Click += (_, _) => ToggleLyricsWindow();
-        menu.Items.Add(lyrics);
-        menu.Items.Add(new Separator());
+        _trayStatusText = new TextBlock
+        {
+            Text = "正在检测 Apple Music",
+            FontSize = 10.5,
+            Margin = new Thickness(0, 2, 0, 0),
+            Foreground = (Brush)Application.Current.FindResource("TextSecondaryBrush")
+        };
+        var statusHeader = new MenuItem
+        {
+            Style = menuItemStyle,
+            Focusable = false,
+            IsHitTestVisible = false,
+            Padding = new Thickness(10, 8, 10, 10),
+            Icon = new Image
+            {
+                Source = LoadOriginalAppIcon(),
+                Width = 24,
+                Height = 24,
+                Stretch = Stretch.Uniform
+            },
+            Header = new StackPanel
+            {
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "Lyric Fever",
+                        FontSize = 13,
+                        FontWeight = FontWeights.SemiBold,
+                        Foreground = (Brush)Application.Current.FindResource("TextPrimaryBrush")
+                    },
+                    _trayStatusText
+                }
+            }
+        };
+        menu.Items.Add(statusHeader);
+        menu.Items.Add(new Separator { Style = separatorStyle });
 
-        var playPause = new MenuItem { Header = "播放 / 暂停" };
-        playPause.Click += async (_, _) => await _viewModel.PlayPauseAsync();
-        menu.Items.Add(playPause);
+        _lyricsMenuItem = CreateMenuItem("隐藏歌词窗口", "\uE890", menuItemStyle);
+        _lyricsMenuItem.Click += (_, _) => ToggleLyricsWindow();
+        menu.Items.Add(_lyricsMenuItem);
 
-        var previous = new MenuItem { Header = "上一首" };
-        previous.Click += async (_, _) => await _viewModel.PreviousAsync();
-        menu.Items.Add(previous);
+        _refreshMenuItem = CreateMenuItem("重新获取当前歌词", "\uE72C", menuItemStyle);
+        _refreshMenuItem.Click += (_, _) => _viewModel.RefreshLyrics();
+        menu.Items.Add(_refreshMenuItem);
+        menu.Items.Add(new Separator { Style = separatorStyle });
 
-        var next = new MenuItem { Header = "下一首" };
-        next.Click += async (_, _) => await _viewModel.NextAsync();
-        menu.Items.Add(next);
-
-        var refresh = new MenuItem { Header = "刷新歌词" };
-        refresh.Click += (_, _) => _viewModel.RefreshLyrics();
-        menu.Items.Add(refresh);
-        menu.Items.Add(new Separator());
-
-        var settings = new MenuItem { Header = "设置" };
+        var settings = CreateMenuItem("设置", "\uE713", menuItemStyle);
         settings.Click += (_, _) => ToggleSettingsWindow();
         menu.Items.Add(settings);
-        menu.Items.Add(new Separator());
 
-        var quit = new MenuItem { Header = "退出" };
+        var quit = CreateMenuItem("退出 Lyric Fever", "\uE7E8", menuItemStyle);
         quit.Click += (_, _) => Application.Current.Shutdown();
         menu.Items.Add(quit);
         return menu;
+    }
+
+    private static MenuItem CreateMenuItem(string header, string glyph, Style style) => new()
+    {
+        Header = header,
+        Style = style,
+        Icon = new TextBlock
+        {
+            Text = glyph,
+            FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
+            FontSize = 15,
+            Foreground = (Brush)Application.Current.FindResource("TextSecondaryBrush"),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center
+        }
+    };
+
+    private void UpdateTrayPresentation()
+    {
+        if (_trayStatusText != null)
+        {
+            if (!_viewModel.HasMediaSession)
+            {
+                _trayStatusText.Text = "等待 Apple Music";
+                _trayStatusText.Foreground = (Brush)Application.Current.FindResource("TextSecondaryBrush");
+            }
+            else if (_viewModel.IsFetching)
+            {
+                _trayStatusText.Text = "正在获取网络歌词";
+                _trayStatusText.Foreground = (Brush)Application.Current.FindResource("AccentBrush");
+            }
+            else
+            {
+                _trayStatusText.Text = _viewModel.IsPlaying
+                    ? "Apple Music · 字幕同步中"
+                    : "Apple Music · 已连接";
+                _trayStatusText.Foreground = (Brush)Application.Current.FindResource("AccentBrush");
+            }
+        }
+
+        if (_lyricsMenuItem != null)
+            _lyricsMenuItem.Header = _userWantsLyricsWindow ? "隐藏歌词窗口" : "显示歌词窗口";
+        if (_refreshMenuItem != null)
+            _refreshMenuItem.IsEnabled = _viewModel.HasMediaSession && !_viewModel.IsFetching;
+        if (_trayIcon != null)
+            _trayIcon.ToolTipText = _viewModel.HasMediaSession
+                ? "Lyric Fever · Apple Music"
+                : "Lyric Fever · 等待 Apple Music";
     }
 
     private static ImageSource LoadOriginalAppIcon()

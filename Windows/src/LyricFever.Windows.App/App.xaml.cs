@@ -66,6 +66,7 @@ public partial class App : Application
             _watcher, fetchService, lyricsRepository, translationPipeline, netEaseProvider);
         _trayIcon = new TrayIconService(MainViewModel);
         _trayIcon.Initialize();
+        if (IsVisualInspectionMode) _trayIcon.ShowSettingsWindow();
         _singleInstance!.StartListening(() => Dispatcher.BeginInvoke(_trayIcon.ShowLyricsWindow));
 
         await MainViewModel.StartAsync();

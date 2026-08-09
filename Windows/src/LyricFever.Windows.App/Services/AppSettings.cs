@@ -16,10 +16,8 @@ public sealed class AppSettings
             "LyricFever", "settings.json");
 
     // ---- 翻译 ----
-    /// <summary>平台人工译词开关。默认关闭。</summary>
-    public bool TranslateEnabled { get; set; }
-    /// <summary>源语言：auto / en / ja。目标语言固定中文。</summary>
-    public string SourceLanguage { get; set; } = "auto";
+    /// <summary>显示经过曲目校验的平台人工译词。新安装默认启用。</summary>
+    public bool TranslateEnabled { get; set; } = true;
 
     // ---- 罗马音 ----
     public bool RomanizationEnabled { get; set; } = true;
@@ -42,15 +40,22 @@ public sealed class AppSettings
 
     public static AppSettings Current => _current ??= Load();
 
-    public static event Action? SettingsChanged;
+    public static event Action<string?>? SettingsChanged;
 
-    public void Save()
+    /// <summary>通知运行中的窗口立即采用当前内存设置。</summary>
+    public void NotifyChanged(string? propertyName = null) => SettingsChanged?.Invoke(propertyName);
+
+    /// <summary>
+    /// 将当前设置写入磁盘。设置窗口会先即时通知 UI，再以防抖方式静默持久化，
+    /// 避免拖动滑块时反复触发布局更新。
+    /// </summary>
+    public void Save(bool notifyListeners = true)
     {
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
             File.WriteAllText(SettingsPath, JsonSerializer.Serialize(this, JsonOptions));
-            SettingsChanged?.Invoke();
+            if (notifyListeners) NotifyChanged();
         }
         catch (Exception ex)
         {

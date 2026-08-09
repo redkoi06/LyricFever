@@ -33,9 +33,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private DateTimeOffset _emptyRetryNotBefore = DateTimeOffset.MinValue;
     private int _emptyRecoveryAttempt;
     private int _taskVersion;
+    private int _artworkRevision;
     private double _lastPositionMs = -1;
     private List<LyricLine>? _currentLyrics;
     private CancellationTokenSource? _currentCts;
+    private byte[]? _currentArtworkData;
+
+    private static readonly System.Windows.Media.Color DefaultBackgroundColor =
+        System.Windows.Media.Color.FromRgb(30, 30, 34);
 
     public MainViewModel(MediaSessionWatcher watcher, LyricFetchService fetchService, LyricsRepository repo,
         TranslationPipelineService translationPipeline,
@@ -81,8 +86,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public event PropertyChangedEventHandler? PropertyChanged;
 
     /// <summary>当前 K 歌背景色（专辑封面提取）。</summary>
-    public System.Windows.Media.Color BackgroundColor { get; private set; } =
-        System.Windows.Media.Color.FromRgb(30, 30, 34);
+    public System.Windows.Media.Color BackgroundColor { get; private set; } = DefaultBackgroundColor;
 
     // ---- 初始化 ----
 
@@ -95,7 +99,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (string.IsNullOrEmpty(track.Title)) return;
         var identity = TrackIdentity(track);
         var sameRequest = string.Equals(_requestedTrackIdentity, identity, StringComparison.Ordinal);
-        // watchdog 和 SMTC 事件可能同时到达：同一曲目的在途任务不得互相取消重启。
+        if (!sameRequest)
+        {
+            _lastPositionMs = -1;
+            _emptyRecoveryAttempt = 0;
+            _emptyRetryNotBefore = DateTimeOffset.MinValue;
+            ResetArtworkState();
+            AppLog.Info("VM", $"track event title={track.Title}; artist={track.Artist}; source={track.AppId}");
+        }
+
+        _requestedTrackIdentity = identity;
+        QueueArtworkUpdate(track.ArtworkData, identity);
+
+        // watchdog 和 SMTC 事件可能同时到达：同一曲目的在途歌词任务不得互相取消重启。
+        // 封面更新已在上方独立处理，因此迟到的缩略图仍能立即替换背景。
         if (sameRequest)
         {
             if (IsFetching || _currentLyrics is { Count: > 0 }) return;
@@ -103,15 +120,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             AppLog.Info("VM", $"empty lyric watchdog recovery attempt={_emptyRecoveryAttempt + 1}; " +
                               $"title={track.Title}; artist={track.Artist}");
         }
-        else
-        {
-            _lastPositionMs = -1;
-            _emptyRecoveryAttempt = 0;
-            _emptyRetryNotBefore = DateTimeOffset.MinValue;
-            AppLog.Info("VM", $"track event title={track.Title}; artist={track.Artist}; source={track.AppId}");
-        }
 
-        _requestedTrackIdentity = identity;
         _ = HandleTrackChangeAsync(track);
     }
 
@@ -155,9 +164,42 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _requestedTrackIdentity = "";
         _emptyRecoveryAttempt = 0;
         _emptyRetryNotBefore = DateTimeOffset.MinValue;
+        ResetArtworkState();
         IsPlaying = false;
         Raise(nameof(IsPlaying));
         RaiseStateChanged();
+    }
+
+    private void ResetArtworkState()
+    {
+        _artworkRevision++;
+        _currentArtworkData = null;
+        if (BackgroundColor == DefaultBackgroundColor) return;
+        BackgroundColor = DefaultBackgroundColor;
+        BackgroundColorChanged?.Invoke(BackgroundColor);
+    }
+
+    private void QueueArtworkUpdate(byte[]? artworkData, string identity)
+    {
+        if (artworkData == null || ReferenceEquals(_currentArtworkData, artworkData)) return;
+        _currentArtworkData = artworkData;
+        var revision = ++_artworkRevision;
+        _ = ApplyArtworkAsync(artworkData, identity, revision);
+    }
+
+    private async Task ApplyArtworkAsync(byte[] artworkData, string identity, int revision)
+    {
+        var color = await Task.Run(() => ImageColorService.ExtractDominantColor(artworkData));
+        if (color == null || revision != _artworkRevision ||
+            !string.Equals(_requestedTrackIdentity, identity, StringComparison.Ordinal))
+        {
+            if (revision == _artworkRevision && ReferenceEquals(_currentArtworkData, artworkData))
+                _currentArtworkData = null;
+            return;
+        }
+
+        BackgroundColor = color.Value;
+        BackgroundColorChanged?.Invoke(color.Value);
     }
 
     // ---- 切歌/刷新统一流程 ----
@@ -181,17 +223,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         try
         {
-            // 0. 专辑封面 → K 歌背景色
-            if (track.ArtworkData != null)
-            {
-                var color = await Task.Run(() => ImageColorService.ExtractDominantColor(track.ArtworkData), token);
-                if (color != null && version == _taskVersion && !token.IsCancellationRequested)
-                {
-                    BackgroundColor = color.Value;
-                    BackgroundColorChanged?.Invoke(color.Value);
-                }
-            }
-
             // 1. Apple Music 不提供跨平台曲目 ID；规范化元数据本身就是缓存身份。
             // 不访问第三方曲目目录，避免错误映射和切歌关键路径上的额外等待。
             var trackId = TrackCacheKey.Create(track.Title, track.Artist);
@@ -322,7 +353,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             var lyrics = _repo.GetLyrics(trackId);
             if (lyrics is not { Count: > 0 }) return null;
             var translated = _translationPipeline.TryGetCachedHumanTranslation(
-                trackId, lyrics, ResolveSourceLanguage(lyrics));
+                trackId, lyrics, DetectSourceLanguage(lyrics));
             if (translated == null || translated.Count != lyrics.Count) return null;
             AppLog.Info("VM", $"using cached matched lyric products; trackId={trackId}; count={lyrics.Count}");
             return new HumanLyricBundle(lyrics, translated);
@@ -382,8 +413,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private async Task RequestTranslationAndRomanizationAsync(string trackId, List<LyricLine> lyrics, int version,
         CancellationToken token, IReadOnlyList<string>? preferredHumanTranslation = null)
     {
-        // 设置页 SourceLanguage 覆盖自动检测（auto → 自动识别）
-        var lang = ResolveSourceLanguage(lyrics);
+        var lang = DetectSourceLanguage(lyrics);
         if (lang is not (LyricLanguage.English or LyricLanguage.Japanese)) return;
 
         var (translated, romanized) = await _translationPipeline.ProcessAsync(
@@ -402,19 +432,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         RaiseStateChanged(); // K 歌窗口重建三层歌词
     }
 
-    private static LyricLanguage ResolveSourceLanguage(List<LyricLine> lyrics) =>
-        AppSettings.Current.SourceLanguage switch
-        {
-            "en" => LyricLanguage.English,
-            "ja" => LyricLanguage.Japanese,
-            _ => LanguageDetector.Detect(lyrics)
-        };
-
-    // ---- 播放控制（托盘菜单用） ----
-
-    public Task PlayPauseAsync() => _watcher.PlayPauseAsync();
-    public Task NextAsync() => _watcher.NextAsync();
-    public Task PreviousAsync() => _watcher.PreviousAsync();
+    private static LyricLanguage DetectSourceLanguage(List<LyricLine> lyrics) =>
+        LanguageDetector.Detect(lyrics);
 
     private static string TrackIdentity(MediaTrackInfo track) =>
         $"{track.Title.Trim()}\u001f{track.Artist.Trim()}\u001f{track.Album.Trim()}";
@@ -436,6 +455,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         Raise(nameof(IsFetching));
         Raise(nameof(CurrentTitle));
+        Raise(nameof(CurrentArtist));
+        Raise(nameof(CurrentAlbum));
         Raise(nameof(CurrentlyPlayingLyrics));
         LyricsStateChanged?.Invoke();
     }

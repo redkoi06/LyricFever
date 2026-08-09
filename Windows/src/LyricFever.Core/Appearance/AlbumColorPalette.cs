@@ -19,45 +19,60 @@ public static class AlbumColorPalette
 
     public static ArtworkColor SelectDominantColor(IEnumerable<ArtworkColorSample> samples)
     {
-        var buckets = new Dictionary<int, ColorBucket>();
+        const int hueBinCount = 12;
+        var hueBuckets = Enumerable.Range(0, hueBinCount)
+            .Select(_ => new ColorBucket())
+            .ToArray();
+        var neutralBucket = new ColorBucket();
         double totalWeight = 0;
 
         foreach (var sample in samples)
         {
             if (!double.IsFinite(sample.Weight) || sample.Weight <= 0) continue;
 
-            var (hue, saturation, value) = RgbToHsv(sample.Red, sample.Green, sample.Blue);
-            var hueBin = saturation < 0.08 ? 24 : Math.Min(23, (int)(hue / 15));
-            var saturationBin = Math.Min(3, (int)(saturation * 4));
-            var valueBin = Math.Min(3, (int)(value * 4));
-            var key = (hueBin << 4) | (saturationBin << 2) | valueBin;
-
-            if (!buckets.TryGetValue(key, out var bucket))
-            {
-                bucket = new ColorBucket();
-                buckets[key] = bucket;
-            }
-
-            bucket.Add(sample);
+            var (hue, saturation, _) = RgbToHsv(sample.Red, sample.Green, sample.Blue);
+            if (saturation < 0.10)
+                neutralBucket.Add(sample);
+            else
+                hueBuckets[Math.Min(hueBinCount - 1, (int)(hue / 30))].Add(sample);
             totalWeight += sample.Weight;
         }
 
-        if (buckets.Count == 0 || totalWeight <= 0)
+        if (totalWeight <= 0)
             return new ArtworkColor(35, 37, 44);
 
+        // Merge neighbouring hue buckets into broad visual families. Album artwork frequently
+        // contains gradients and shaded illustrations: splitting those pixels by saturation and
+        // brightness lets a tiny flat-colored logo beat the actual cover. Adjacent half-weights
+        // keep a family continuous across a 30-degree bin boundary without blending opposites.
+        var candidates = new List<ColorBucket>();
+        if (neutralBucket.Weight > 0) candidates.Add(neutralBucket);
+        for (var index = 0; index < hueBuckets.Length; index++)
+        {
+            if (hueBuckets[index].Weight <= 0) continue;
+            var family = new ColorBucket();
+            family.Add(hueBuckets[index]);
+            family.Add(hueBuckets[(index + hueBinCount - 1) % hueBinCount], 0.5);
+            family.Add(hueBuckets[(index + 1) % hueBinCount], 0.5);
+            candidates.Add(family);
+        }
+
+        var largestFamilyWeight = candidates.Max(candidate => candidate.Weight);
         ColorBucket? best = null;
         double bestScore = double.MinValue;
-        foreach (var bucket in buckets.Values)
+        foreach (var bucket in candidates)
         {
+            // A representative family must occupy real visual area. This keeps a small, highly
+            // saturated title/logo from displacing a broad pale or shaded album palette.
+            if (bucket.Weight < largestFamilyWeight * 0.30) continue;
+
             var color = bucket.Average;
             var (_, saturation, value) = RgbToHsv(color.Red, color.Green, color.Blue);
             var population = bucket.Weight / totalWeight;
 
-            // Population remains the primary signal. Saturation can promote a substantial accent,
-            // but cannot let a handful of vivid pixels displace the artwork's actual palette.
-            var colorfulness = 0.35 + saturation * 1.15;
+            var colorfulness = 0.40 + saturation * 0.90;
             var tonePenalty = value < 0.08 || (value > 0.94 && saturation < 0.12) ? 0.55 : 1.0;
-            var score = Math.Pow(population, 0.70) * colorfulness * tonePenalty;
+            var score = Math.Pow(population, 0.82) * colorfulness * tonePenalty;
             if (score <= bestScore) continue;
 
             best = bucket;
@@ -192,6 +207,15 @@ public static class AlbumColorPalette
             _green += sample.Green * sample.Weight;
             _blue += sample.Blue * sample.Weight;
             Weight += sample.Weight;
+        }
+
+        public void Add(ColorBucket bucket, double weightMultiplier = 1)
+        {
+            if (bucket.Weight <= 0 || weightMultiplier <= 0) return;
+            _red += bucket._red * weightMultiplier;
+            _green += bucket._green * weightMultiplier;
+            _blue += bucket._blue * weightMultiplier;
+            Weight += bucket.Weight * weightMultiplier;
         }
     }
 }

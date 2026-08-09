@@ -258,8 +258,7 @@ public sealed class MediaSessionWatcher : IDisposable
                 Duration = timeline.EndTime,
                 AppId = session.SourceAppUserModelId,
                 PositionMs = EstimatePositionMs(timeline, playback),
-                IsPlaying = playback?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing,
-                ArtworkData = _lastTrack?.ArtworkData
+                IsPlaying = playback?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
             };
 
             var changed = _lastTrack == null ||
@@ -268,8 +267,12 @@ public sealed class MediaSessionWatcher : IDisposable
                           !string.Equals(_lastTrack.Album, track.Album, StringComparison.Ordinal);
 
             if (changed) _positionStabilizer.Reset();
+            track.ArtworkData = changed ? null : _lastTrack?.ArtworkData;
 
-            if (changed && props.Thumbnail != null)
+            // Apple Music can publish the new title before its thumbnail. Never carry the previous
+            // song's bytes across a metadata identity change; retry the thumbnail on later events
+            // and watchdog ticks until the current track has artwork.
+            if (track.ArtworkData == null && props.Thumbnail != null)
             {
                 try
                 {
@@ -279,6 +282,8 @@ public sealed class MediaSessionWatcher : IDisposable
                         global::Windows.Storage.Streams.InputStreamOptions.None);
                     if (!ReferenceEquals(_session, session) || revision != _sessionRevision) return;
                     track.ArtworkData = buffer;
+                    AppLog.Info("Artwork",
+                        $"loaded bytes={buffer.Length}; title={track.Title}; reason={reason}");
                 }
                 catch
                 {
@@ -360,38 +365,6 @@ public sealed class MediaSessionWatcher : IDisposable
     {
         var stabilized = _positionStabilizer.Observe(positionMs, isPlaying);
         if (stabilized.HasValue) PositionChanged?.Invoke(stabilized.Value);
-    }
-
-    public async Task PlayPauseAsync()
-    {
-        var session = _session;
-        if (session == null) return;
-        try
-        {
-            var playback = session.GetPlaybackInfo();
-            if (playback?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
-                await session.TryPauseAsync();
-            else
-                await session.TryPlayAsync();
-        }
-        catch
-        {
-            // 播放器可在调用瞬间退出。
-        }
-    }
-
-    public async Task NextAsync()
-    {
-        var session = _session;
-        if (session == null) return;
-        try { await session.TrySkipNextAsync(); } catch { }
-    }
-
-    public async Task PreviousAsync()
-    {
-        var session = _session;
-        if (session == null) return;
-        try { await session.TrySkipPreviousAsync(); } catch { }
     }
 
     public void Dispose()
