@@ -206,7 +206,7 @@ public sealed class NetEaseLyricProvider : ILyricProvider, IHumanTranslationProv
                 mappedIntervals.Add((index, sourceIndex, translationIndex));
         }
 
-        // One provider line can be split into multiple lines by Spotify/LRCLIB. After all
+        // One provider line can be split into multiple lines by another synced-lyric source. After all
         // translation fragments have been merged, repeat the complete translation into
         // blank reference lines that still belong to the same provider interval.
         foreach (var (referenceIndex, sourceIndex, translationIndex) in mappedIntervals.Distinct())

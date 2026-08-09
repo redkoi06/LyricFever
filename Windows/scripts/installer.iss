@@ -41,6 +41,10 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 Type: filesandordirs; Name: "{app}\models"
 Type: files; Name: "{app}\LyricFeverTranslation.dll"
 Type: files; Name: "{app}\dnnl.dll"
+; Apple Music 单播放器版本不再需要网页登录依赖。
+Type: files; Name: "{app}\Microsoft.Web.WebView2.*"
+Type: files; Name: "{app}\WebView2Loader.dll"
+Type: files; Name: "{app}\runtimes\win-x64\native\WebView2Loader.dll"
 
 [Icons]
 Name: "{autoprograms}\Lyric Fever"; Filename: "{app}\{#MyAppExeName}"

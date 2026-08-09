@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace LyricFever.Core.Lyrics;
 
 /// <summary>
-/// 歌词行（对应 macOS LyricLine）。startTimeMs 以字符串解码（Spotify 返回字符串时间戳）。
+/// 歌词行（对应 macOS LyricLine）。startTimeMs 使用字符串保存，以兼容网络歌词中的文本时间戳。
 /// </summary>
 public sealed class LyricLine
 {

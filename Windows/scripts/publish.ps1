@@ -30,11 +30,18 @@ foreach ($file in $required) {
 }
 if ($missing.Count -gt 0) { throw "Missing required files: $($missing -join ', ')" }
 
-$forbidden = @("LyricFeverTranslation.dll", "dnnl.dll", "models")
+$forbidden = @(
+    "LyricFeverTranslation.dll", "dnnl.dll", "models",
+    "Microsoft.Web.WebView2.Core.dll",
+    "Microsoft.Web.WebView2.Wpf.dll",
+    "Microsoft.Web.WebView2.WinForms.dll",
+    "WebView2Loader.dll",
+    "runtimes\win-x64\native\WebView2Loader.dll"
+)
 foreach ($item in $forbidden) {
     $path = Join-Path $out $item
     if (Test-Path -LiteralPath $path) {
-        throw "Retired local translation artifact leaked into release: $path"
+        throw "Retired dependency leaked into release: $path"
     }
 }
 

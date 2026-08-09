@@ -19,7 +19,6 @@ public sealed class TrayIconService : IDisposable
     private readonly MainViewModel _viewModel;
     private TaskbarIcon? _trayIcon;
     private SettingsWindow? _settingsWindow;
-    private SpotifyLoginWindow? _loginWindow;
     private KaraokeWindow? _karaokeWindow;
     private readonly DispatcherTimer _hideDelayTimer;
     private bool _userWantsLyricsWindow = true;
@@ -161,17 +160,6 @@ public sealed class TrayIconService : IDisposable
         }
     }
 
-    private void ShowLoginWindow()
-    {
-        if (_loginWindow == null)
-        {
-            _loginWindow = new SpotifyLoginWindow();
-            _loginWindow.Closed += (_, _) => _loginWindow = null;
-        }
-        _loginWindow.Show();
-        _loginWindow.Activate();
-    }
-
     private ContextMenu CreateContextMenu()
     {
         var menu = new ContextMenu();
@@ -197,10 +185,6 @@ public sealed class TrayIconService : IDisposable
         refresh.Click += (_, _) => _viewModel.RefreshLyrics();
         menu.Items.Add(refresh);
         menu.Items.Add(new Separator());
-
-        var login = new MenuItem { Header = "Spotify 登录" };
-        login.Click += (_, _) => ShowLoginWindow();
-        menu.Items.Add(login);
 
         var settings = new MenuItem { Header = "设置" };
         settings.Click += (_, _) => ToggleSettingsWindow();

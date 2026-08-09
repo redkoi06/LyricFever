@@ -5,21 +5,15 @@ namespace LyricFever.Windows.App.Services;
 
 /// <summary>
 /// 应用设置（JSON 落盘，位于 %APPDATA%\LyricFever\settings.json）。
-/// 与 macOS 版 UserDefaults 对应；敏感字段（sp_dc）单独 DPAPI 加密存储。
+/// JSON 中的未知字段由序列化器忽略；开发阶段不保留退役功能的迁移分支。
 /// </summary>
 public sealed class AppSettings
 {
-    private const int CurrentSettingsSchemaVersion = 4;
-    private const int CurrentTranslationModelVersion = 4;
+    public const int TranslationCacheVersion = 4;
+    public const int RomanizationCacheVersion = 1;
     private static readonly string SettingsPath =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "LyricFever", "settings.json");
-
-    // ---- 播放器 ----
-    /// <summary>首选 SMTC 播放器：AppleMusic / Spotify / Any。</summary>
-    public string PreferredPlayer { get; set; } = "AppleMusic";
-    /// <summary>旧设置兼容字段；播放器选择改由 PreferredPlayer 驱动。</summary>
-    public bool UseSpotify { get; set; } = true;
 
     // ---- 翻译 ----
     /// <summary>平台人工译词开关。默认关闭。</summary>
@@ -43,11 +37,6 @@ public sealed class AppSettings
 
     // ---- 通用 ----
     public bool LaunchAtStartup { get; set; }
-
-    // ---- 译词产物缓存版本（来源策略升级时 +1 使旧缓存失效） ----
-    public int TranslationModelVersion { get; set; } = CurrentTranslationModelVersion;
-    public int RomanizationVersion { get; set; } = 1;
-    public int SettingsSchemaVersion { get; set; } = CurrentSettingsSchemaVersion;
 
     private static AppSettings? _current;
 
@@ -76,33 +65,8 @@ public sealed class AppSettings
             if (File.Exists(SettingsPath))
             {
                 var json = File.ReadAllText(SettingsPath);
-                using var document = JsonDocument.Parse(json);
-                var hasSchemaVersion = document.RootElement.TryGetProperty(nameof(SettingsSchemaVersion), out _);
                 var loaded = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions);
-                if (loaded != null)
-                {
-                    var previousSchemaVersion = hasSchemaVersion ? loaded.SettingsSchemaVersion : 0;
-                    // 早期 Windows 原型把悬浮窗默认透明度设为 90%，且固定只监听 Spotify。
-                    // 首次升级到可用版本时迁移到 macOS 原版的 50% 和 Apple Music 默认值。
-                    if (previousSchemaVersion < 1)
-                    {
-                        loaded.KaraokeOpacity = 0.5;
-                        loaded.PreferredPlayer = "AppleMusic";
-                    }
-                    if (previousSchemaVersion < 3)
-                    {
-                        // 所有最终人工译词版本之前的缓存都必须失效，确保旧模型文本不留在本地。
-                        loaded.TranslationModelVersion = CurrentTranslationModelVersion;
-                    }
-                    if (previousSchemaVersion < 4)
-                        loaded.KaraokeOpacity = Math.Max(0.82, loaded.KaraokeOpacity);
-                    if (previousSchemaVersion < CurrentSettingsSchemaVersion)
-                    {
-                        loaded.SettingsSchemaVersion = CurrentSettingsSchemaVersion;
-                        loaded.Save();
-                    }
-                    return loaded;
-                }
+                if (loaded != null) return loaded;
             }
         }
         catch (Exception ex)

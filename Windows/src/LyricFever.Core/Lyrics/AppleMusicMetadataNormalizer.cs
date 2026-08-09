@@ -2,7 +2,7 @@ namespace LyricFever.Core.Lyrics;
 
 /// <summary>
 /// Apple Music for Windows 的 SMTC Artist/Album 字段有时会合并成“歌手 — 专辑”。
-/// 搜索歌词前拆回独立字段；Spotify 和其他播放器不使用该规则。
+/// 搜索歌词前拆回独立字段；该规则只服务 Apple Music 的 SMTC 元数据。
 /// </summary>
 public static class AppleMusicMetadataNormalizer
 {

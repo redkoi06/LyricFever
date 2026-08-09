@@ -1,10 +1,7 @@
 using System.ComponentModel;
-using System.Security.Cryptography;
-using System.Text;
 using LyricFever.Core.Interfaces;
 using LyricFever.Core.Lyrics;
 using LyricFever.Core.Providers;
-using LyricFever.Core.Providers.Spotify;
 using LyricFever.Core.Storage;
 using LyricFever.Windows.App.Services;
 using LyricFever.Windows.App.Services.Translation;
@@ -13,9 +10,9 @@ namespace LyricFever.Windows.App.ViewModels;
 
 /// <summary>
 /// 主流程 ViewModel（对应 macOS ViewModel.swift 的歌词状态机）：
-/// SMTC 曲目事件 → track ID 映射 → 歌词获取（缓存→Provider 链）→ 同步引擎 → UI 事件。
+/// Apple Music SMTC 曲目事件 → 元数据曲目键 → 歌词获取（缓存→Provider 链）→ 同步引擎 → UI 事件。
 ///
-/// 执行指挥书 P0-B 约定：
+/// 状态机约束：
 /// - 每个曲目一个 CancellationTokenSource：切歌/刷新/退出统一取消旧任务
 /// - 歌词数组 + 索引 + 派生数组（译文/罗马音）作为一组状态，切歌整组重置
 /// - 异步返回时同时校验任务版本与取消状态，旧歌曲结果不得覆盖新歌曲
@@ -25,7 +22,6 @@ namespace LyricFever.Windows.App.ViewModels;
 public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly MediaSessionWatcher _watcher;
-    private readonly SpotifyTrackMapper _trackMapper;
     private readonly LyricFetchService _fetchService;
     private readonly LyricsRepository _repo;
     private readonly TranslationPipelineService _translationPipeline;
@@ -41,13 +37,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private List<LyricLine>? _currentLyrics;
     private CancellationTokenSource? _currentCts;
 
-    public MainViewModel(MediaSessionWatcher watcher, SpotifyTrackMapper trackMapper,
-        LyricFetchService fetchService, LyricsRepository repo,
+    public MainViewModel(MediaSessionWatcher watcher, LyricFetchService fetchService, LyricsRepository repo,
         TranslationPipelineService translationPipeline,
         IHumanTranslationProvider humanTranslationProvider)
     {
         _watcher = watcher;
-        _trackMapper = trackMapper;
         _fetchService = fetchService;
         _repo = repo;
         _translationPipeline = translationPipeline;
@@ -74,7 +68,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public string CurrentArtist { get; private set; } = "";
     public string CurrentAlbum { get; private set; } = "";
     public bool IsFetching { get; private set; }
-    public bool IsSpotifyLoggedIn { get; private set; }
     public bool HasMediaSession { get; private set; }
     public bool IsPlaying { get; private set; }
 
@@ -93,31 +86,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     // ---- 初始化 ----
 
-    public async Task StartAsync()
-    {
-        // 恢复 sp_dc → 判定登录状态
-        var cookie = CredentialStore.Get("spotify.sp_dc");
-        SetSpotifyLoggedIn(!string.IsNullOrEmpty(cookie));
-        await _watcher.StartAsync();
-    }
-
-    /// <summary>登录状态回调（登录窗口成功后注入，无需重启）。</summary>
-    public void OnSpotifyLoggedIn(string? spDcCookie)
-    {
-        SetSpotifyLoggedIn(!string.IsNullOrEmpty(spDcCookie));
-        // 注入运行中的 Provider（立即生效）
-        var app = System.Windows.Application.Current as App;
-        if (app != null) app.SpotifyProvider.SpDcCookie = spDcCookie;
-        // 清除可能失效的旧 token
-        _ = Task.Run(() => app?.SpotifyProvider.ClearAccessToken());
-    }
-
-    private void SetSpotifyLoggedIn(bool loggedIn)
-    {
-        if (IsSpotifyLoggedIn == loggedIn) return;
-        IsSpotifyLoggedIn = loggedIn;
-        Raise(nameof(IsSpotifyLoggedIn));
-    }
+    public Task StartAsync() => _watcher.StartAsync();
 
     // ---- 曲目事件 ----
 
@@ -223,26 +192,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 }
             }
 
-            // 1. SMTC 元数据 → Spotify track ID（带 DB 缓存）
-            SpotifyTrackInfo? resolved;
-            using (var mappingTimeout = CancellationTokenSource.CreateLinkedTokenSource(token))
-            {
-                mappingTimeout.CancelAfter(TimeSpan.FromSeconds(8));
-                try
-                {
-                    resolved = await _trackMapper.ResolveAsync(track.Title, track.Artist,
-                        string.IsNullOrEmpty(track.Album) ? null : track.Album, mappingTimeout.Token);
-                }
-                catch (OperationCanceledException) when (!token.IsCancellationRequested)
-                {
-                    resolved = null;
-                    AppLog.Info("VM", $"Spotify mapping timed out; using metadata fallback; title={track.Title}");
-                }
-            }
-            token.ThrowIfCancellationRequested();
-            if (version != _taskVersion) return;
-
-            var trackId = resolved?.TrackId ?? AlternativeId(track.Title, track.Artist);
+            // 1. Apple Music 不提供跨平台曲目 ID；规范化元数据本身就是缓存身份。
+            // 不访问第三方曲目目录，避免错误映射和切歌关键路径上的额外等待。
+            var trackId = TrackCacheKey.Create(track.Title, track.Artist);
 
             // 2. 优先使用同一平台成对提供的原文和人工译文；不可用时走普通兜底链。
             var humanBundle = AppSettings.Current.TranslateEnabled
@@ -463,13 +415,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public Task PlayPauseAsync() => _watcher.PlayPauseAsync();
     public Task NextAsync() => _watcher.NextAsync();
     public Task PreviousAsync() => _watcher.PreviousAsync();
-
-    /// <summary>替代 ID（对应 macOS alternativeID）：歌手+歌名稳定哈希，供非 Spotify 来源兜底。</summary>
-    internal static string AlternativeId(string title, string artist)
-    {
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes($"{artist}|{title}"));
-        return Convert.ToHexString(hash)[..22].ToLowerInvariant();
-    }
 
     private static string TrackIdentity(MediaTrackInfo track) =>
         $"{track.Title.Trim()}\u001f{track.Artist.Trim()}\u001f{track.Album.Trim()}";

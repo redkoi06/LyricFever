@@ -48,11 +48,3 @@ public interface IHumanTranslationProvider
 public sealed record HumanLyricBundle(
     IReadOnlyList<LyricLine> SourceLyrics,
     IReadOnlyList<string> TranslatedLyrics);
-
-/// <summary>歌词源类型。</summary>
-public enum LyricProviderType
-{
-    Spotify,
-    Lrclib,
-    NetEase
-}

@@ -34,7 +34,7 @@ public sealed class TranslationPipelineService : IDisposable
         if (language is not (LyricLanguage.English or LyricLanguage.Japanese)) return null;
         var sourceCode = language == LyricLanguage.Japanese ? "ja" : "en";
         var hit = _cache.Get(trackId, lyrics, sourceCode, TargetLanguage,
-            AppSettings.Current.TranslationModelVersion, AppSettings.Current.RomanizationVersion);
+            AppSettings.TranslationCacheVersion, AppSettings.RomanizationCacheVersion);
         return hit?.TranslationReady == true
             ? HumanTranslationContinuity.ReusePreviousForMissingNextLine(
                 lyrics, Pad(hit.Translated, lyrics.Count))
@@ -66,7 +66,7 @@ public sealed class TranslationPipelineService : IDisposable
         {
             var sourceCode = language == LyricLanguage.Japanese ? "ja" : "en";
             var hit = _cache.Get(trackId, lyrics, sourceCode, TargetLanguage,
-                AppSettings.Current.TranslationModelVersion, AppSettings.Current.RomanizationVersion);
+                AppSettings.TranslationCacheVersion, AppSettings.RomanizationCacheVersion);
             if (hit != null)
             {
                 if (!translationReady) translated = hit.Translated;
@@ -110,7 +110,7 @@ public sealed class TranslationPipelineService : IDisposable
         {
             var sourceCode = language == LyricLanguage.Japanese ? "ja" : "en";
             _cache.Put(trackId, lyrics, sourceCode, TargetLanguage,
-                AppSettings.Current.TranslationModelVersion, AppSettings.Current.RomanizationVersion,
+                AppSettings.TranslationCacheVersion, AppSettings.RomanizationCacheVersion,
                 translated, translationReady, romanized, romanizationReady);
         }
 

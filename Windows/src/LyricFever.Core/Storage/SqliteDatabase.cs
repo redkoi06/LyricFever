@@ -66,14 +66,6 @@ public sealed class SqliteDatabase
                 romanizationReady INTEGER NOT NULL DEFAULT 0,
                 createdAt TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS SpotifyTrackMap (
-                artistTitleKey TEXT PRIMARY KEY,
-                trackId TEXT NOT NULL,
-                songName TEXT NOT NULL,
-                artistName TEXT NOT NULL,
-                albumName TEXT NOT NULL,
-                updatedAt TEXT NOT NULL
-            );
             """;
         cmd.ExecuteNonQuery();
 

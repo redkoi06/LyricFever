@@ -14,7 +14,7 @@ public sealed class LyricFetchResult
 
 /// <summary>
 /// 歌词获取编排（对应 macOS ViewModel 的 fetchLyrics 链路）：
-/// 缓存 → Spotify → LRCLIB → NetEase 兜底链；成功后写缓存与颜色缓存。
+/// 缓存 → LRCLIB → NetEase 兜底链；成功后写缓存与颜色缓存。
 /// </summary>
 public sealed class LyricFetchService
 {

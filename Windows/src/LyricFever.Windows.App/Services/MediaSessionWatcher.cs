@@ -46,10 +46,7 @@ public sealed class MediaSessionWatcher : IDisposable
     public event Action<bool>? PlaybackStateChanged;
     public event Action<bool>? MediaSessionAvailabilityChanged;
 
-    public MediaPlayerPreference PreferredPlayer { get; set; } = MediaPlayerPreference.AppleMusic;
-
     public bool HasMediaSession { get; private set; }
-    public string? CurrentSourceAppId => _session?.SourceAppUserModelId;
     public bool IsRunning { get; private set; }
 
     public MediaSessionWatcher()
@@ -64,26 +61,20 @@ public sealed class MediaSessionWatcher : IDisposable
     {
         if (IsRunning) return;
         _manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
-        AppLog.Info("SMTC", $"manager ready; preferred={PreferredPlayer}");
+        AppLog.Info("SMTC", "manager ready; player=AppleMusic");
         _manager.CurrentSessionChanged += OnCurrentSessionChanged;
         _manager.SessionsChanged += OnSessionsChanged;
 
-        var selected = SelectPreferredSession(logInventory: true);
+        var selected = SelectAppleMusicSession(logInventory: true);
         Attach(selected);
         _timelineTimer.Start();
         _watchdogTimer.Start();
         IsRunning = true;
     }
 
-    /// <summary>设置变更后立即重新评估当前 session，不沿用旧播放器。</summary>
-    public void ApplySessionFilter() => ReevaluateSession(allowGrace: false, logInventory: true);
-
-    private GlobalSystemMediaTransportControlsSession? SelectPreferredSession(bool logInventory)
+    private GlobalSystemMediaTransportControlsSession? SelectAppleMusicSession(bool logInventory)
     {
         if (_manager == null) return null;
-        if (PreferredPlayer == MediaPlayerPreference.Any)
-            return _manager.GetCurrentSession();
-
         var sessions = _manager.GetSessions();
         var inventory = string.Join(", ", sessions.Select(session => session.SourceAppUserModelId));
         if (logInventory || !string.Equals(inventory, _lastSessionInventory, StringComparison.Ordinal))
@@ -92,9 +83,7 @@ public sealed class MediaSessionWatcher : IDisposable
             _lastSessionInventory = inventory;
         }
 
-        return PreferredPlayer == MediaPlayerPreference.AppleMusic
-            ? sessions.FirstOrDefault(session => IsAppleMusicAppId(session.SourceAppUserModelId))
-            : sessions.FirstOrDefault(session => IsSpotifyAppId(session.SourceAppUserModelId));
+        return sessions.FirstOrDefault(session => IsAppleMusicAppId(session.SourceAppUserModelId));
     }
 
     internal static bool IsAppleMusicAppId(string? appId) =>
@@ -102,20 +91,13 @@ public sealed class MediaSessionWatcher : IDisposable
         (appId.Contains("AppleInc.AppleMusicWin", StringComparison.OrdinalIgnoreCase) ||
          appId.Contains("AppleMusic", StringComparison.OrdinalIgnoreCase));
 
-    internal static bool IsSpotifyAppId(string? appId)
-    {
-        if (string.IsNullOrWhiteSpace(appId)) return false;
-        return appId.StartsWith("Spotify", StringComparison.OrdinalIgnoreCase) ||
-               appId.Contains("SpotifyAB.SpotifyMusic", StringComparison.OrdinalIgnoreCase);
-    }
-
     private void ReevaluateSession(bool allowGrace, bool logInventory)
     {
         if (_disposed) return;
         GlobalSystemMediaTransportControlsSession? selected;
         try
         {
-            selected = SelectPreferredSession(logInventory);
+            selected = SelectAppleMusicSession(logInventory);
         }
         catch (Exception ex)
         {
@@ -141,7 +123,7 @@ public sealed class MediaSessionWatcher : IDisposable
             _sessionMissingSince ??= DateTimeOffset.UtcNow;
             if (DateTimeOffset.UtcNow - _sessionMissingSince < SessionLossGrace)
             {
-                AppLog.Info("SMTC", "preferred session temporarily missing; retaining current lyrics during grace period");
+                AppLog.Info("SMTC", "Apple Music session temporarily missing; retaining current lyrics during grace period");
                 return;
             }
         }
@@ -265,11 +247,8 @@ public sealed class MediaSessionWatcher : IDisposable
 
             var timeline = session.GetTimelineProperties();
             var playback = session.GetPlaybackInfo();
-            var sourceAppId = session.SourceAppUserModelId;
             var rawAlbum = !string.IsNullOrWhiteSpace(props.AlbumTitle) ? props.AlbumTitle : props.AlbumArtist ?? "";
-            var normalized = IsAppleMusicAppId(sourceAppId)
-                ? AppleMusicMetadataNormalizer.Normalize(props.Artist, rawAlbum)
-                : (props.Artist?.Trim() ?? "", rawAlbum.Trim());
+            var normalized = AppleMusicMetadataNormalizer.Normalize(props.Artist, rawAlbum);
 
             var track = new MediaTrackInfo
             {
@@ -277,7 +256,7 @@ public sealed class MediaSessionWatcher : IDisposable
                 Artist = normalized.Item1,
                 Album = normalized.Item2,
                 Duration = timeline.EndTime,
-                AppId = sourceAppId,
+                AppId = session.SourceAppUserModelId,
                 PositionMs = EstimatePositionMs(timeline, playback),
                 IsPlaying = playback?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing,
                 ArtworkData = _lastTrack?.ArtworkData
@@ -436,11 +415,4 @@ public sealed class MediaSessionWatcher : IDisposable
             _session = null;
         }
     }
-}
-
-public enum MediaPlayerPreference
-{
-    AppleMusic,
-    Spotify,
-    Any
 }
