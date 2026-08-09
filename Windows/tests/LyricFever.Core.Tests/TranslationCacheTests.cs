@@ -85,7 +85,7 @@ public class TranslationCacheTests : IDisposable
     }
 
     [Fact]
-    public void ShortTranslationPaddedToLyricLength()
+    public void ShortTranslationPaddedAndMissingNextLineReusesPrevious()
     {
         var cache = MakeCache();
         var lyrics = Lyrics((1000, "Hello"), (2000, "World"));
@@ -94,8 +94,38 @@ public class TranslationCacheTests : IDisposable
 
         var hit = cache.Get("track1", lyrics, "en", "zh", 1, 1);
         Assert.NotNull(hit);
-        Assert.Equal(new[] { "你好", "" }, hit!.Translated);
+        Assert.Equal(new[] { "你好", "你好" }, hit!.Translated);
         Assert.Equal(new[] { "", "" }, hit.Romanized);
+    }
+
+    [Fact]
+    public void LegacyCachedMissingNextLineIsRepairedOnRead()
+    {
+        var database = new SqliteDatabase(_dbPath);
+        var cache = new TranslationCache(database);
+        var lyrics = Lyrics(
+            (72_510, "ふとした仕草に今日もハートZUKI★ZUKI"),
+            (77_800, "さりげな笑顔を深読みしぎて Over heat!"));
+        const string complete = "意想不到的动作今天也好喜欢 太过深入地解读着笑容";
+        cache.Put("track1", lyrics, "ja", "zh", 1, 1,
+            new List<string> { complete, complete }, true,
+            new List<string>(), false);
+
+        using (var connection = database.OpenConnection())
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                UPDATE TranslationCache
+                SET translatedLyrics = '["意想不到的动作今天也好喜欢 太过深入地解读着笑容",""]'
+                WHERE trackId = 'track1'
+                """;
+            Assert.Equal(1, command.ExecuteNonQuery());
+        }
+
+        var hit = cache.Get("track1", lyrics, "ja", "zh", 1, 1);
+
+        Assert.NotNull(hit);
+        Assert.Equal(new[] { complete, complete }, hit!.Translated);
     }
 
     /// <summary>只开翻译写入后，罗马音不得被视为可用；后续开罗马音时必须重建。</summary>

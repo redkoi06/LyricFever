@@ -270,7 +270,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             _currentTrackId = trackId;
             _currentLyrics = result.Lyrics.Count > 0 ? result.Lyrics : null;
             _sync.Lyrics = _currentLyrics;
-            TranslatedLyrics = humanBundle?.TranslatedLyrics.ToList() ?? new List<string>();
+            TranslatedLyrics = humanBundle == null || _currentLyrics == null
+                ? new List<string>()
+                : HumanTranslationContinuity.ReusePreviousForMissingNextLine(
+                    _currentLyrics, humanBundle.TranslatedLyrics);
             if (_currentLyrics == null)
                 ScheduleEmptyRecovery();
             else

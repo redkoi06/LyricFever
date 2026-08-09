@@ -35,7 +35,10 @@ public sealed class TranslationPipelineService : IDisposable
         var sourceCode = language == LyricLanguage.Japanese ? "ja" : "en";
         var hit = _cache.Get(trackId, lyrics, sourceCode, TargetLanguage,
             AppSettings.Current.TranslationModelVersion, AppSettings.Current.RomanizationVersion);
-        return hit?.TranslationReady == true ? Pad(hit.Translated, lyrics.Count) : null;
+        return hit?.TranslationReady == true
+            ? HumanTranslationContinuity.ReusePreviousForMissingNextLine(
+                lyrics, Pad(hit.Translated, lyrics.Count))
+            : null;
     }
 
     public async Task<(List<string> Translated, List<string> Romanized)> ProcessAsync(
@@ -97,6 +100,10 @@ public sealed class TranslationPipelineService : IDisposable
             romanized = Pad(romanizeTask.Result.ToList(), count);
             romanizationReady = true;
         }
+
+        if (translationReady)
+            translated = HumanTranslationContinuity.ReusePreviousForMissingNextLine(
+                lyrics, Pad(translated, count));
 
         if ((translateNeeded || romanizeNeeded || preferredTranslationReady) &&
             (translationReady || romanizationReady))

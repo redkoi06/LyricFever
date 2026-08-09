@@ -242,7 +242,8 @@ public sealed class NetEaseLyricProvider : ILyricProvider, IHumanTranslationProv
                     result[nextIndex] = completeTranslation;
             }
         }
-        return result;
+        return HumanTranslationContinuity.ReusePreviousForMissingNextLine(
+            referenceLyrics, result);
     }
 
     internal static bool HasSufficientCoverage(IReadOnlyList<LyricLine> referenceLyrics,

@@ -73,6 +73,10 @@ public sealed class TranslationCache
                 romanized.Count != lyrics.Count)
                 return null;
 
+            if (translationReady)
+                translated = HumanTranslationContinuity.ReusePreviousForMissingNextLine(
+                    lyrics, translated);
+
             return new TranslationCacheHit(translated, translationReady, romanized, romanizationReady);
         }
         catch (JsonException)
@@ -95,6 +99,9 @@ public sealed class TranslationCache
 
         // 规范化：两个数组必须与歌词等长（缺失行用空字符串占位）
         translated = PadToLength(translated, lyrics.Count);
+        if (translationReady)
+            translated = HumanTranslationContinuity.ReusePreviousForMissingNextLine(
+                lyrics, translated);
         romanized = PadToLength(romanized, lyrics.Count);
 
         using var conn = _db.OpenConnection();
