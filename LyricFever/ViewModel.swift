@@ -1104,10 +1104,69 @@ import MediaRemoteAdapter
     }
 
     private func resyncAppleMusicLyricsFromPlaybackPosition() {
+        resyncLyricsFromPlaybackPosition()
+    }
+
+    private func resyncLyricsFromPlaybackPosition() {
+        if let position = currentPlayerInstance.currentTime {
+            currentTime = CurrentTimeWithStoredDate(currentTime: position)
+        }
         currentlyPlayingLyricsIndex = nil
         stopLyricUpdater()
         if showLyrics, userDefaultStorage.hasOnboarded, isPlaying {
             startLyricUpdater(runSpotifyDriftFix: false)
+        }
+    }
+
+    /// Re-reads the selected player's live state and repairs lyric timing without
+    /// redownloading lyrics when the current track has not changed.
+    func resyncPlaybackAndLyrics() async {
+        guard userDefaultStorage.hasOnboarded, currentPlayerInstance.isRunning else {
+            return
+        }
+
+        isStopped = false
+        isPlaying = currentPlayerInstance.isPlaying
+
+        switch currentPlayer {
+            case .appleMusic:
+                let previousPersistentID = currentlyPlayingAppleMusicPersistentID
+                guard refreshAppleMusicMetadataFromPlayer() else {
+                    resyncLyricsFromPlaybackPosition()
+                    return
+                }
+
+                if currentlyPlayingAppleMusicPersistentID != previousPersistentID {
+                    await appleMusicStarter()
+                } else {
+                    resyncLyricsFromPlaybackPosition()
+                }
+
+            case .spotify:
+                guard let trackID = spotifyPlayer.trackID,
+                      !trackID.isEmpty,
+                      let trackName = spotifyPlayer.trackName,
+                      !trackName.isEmpty else {
+                    return
+                }
+
+                let trackChanged = currentlyPlaying != trackID
+                currentlyPlayingName = trackName
+                currentlyPlayingArtist = spotifyPlayer.artistName
+                currentAlbumName = spotifyPlayer.albumName
+                if let duration = spotifyPlayer.duration {
+                    self.duration = duration
+                }
+
+                if trackChanged {
+                    resetSpotifyEmptyLyricsRetry()
+                    stopLyricUpdater()
+                    currentlyPlaying = trackID
+                    refreshManualLyricsOffsetForCurrentTrack()
+                    refreshArtworkForCurrentTrack(reason: "manual playback resync")
+                } else {
+                    resyncLyricsFromPlaybackPosition()
+                }
         }
     }
 

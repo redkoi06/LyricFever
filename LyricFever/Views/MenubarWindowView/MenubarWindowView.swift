@@ -15,6 +15,7 @@ struct MenubarWindowView: View {
     @State var currentHoveredItem = MenubarButtonHighlight.none
     @State private var showOtherOptionsPopover = false
     @State private var isSettingsButtonHovered = false
+    @State private var isPlaybackResyncing = false
 
     private var menubarDisplayLength: Int {
         min(max(viewmodel.userDefaultStorage.truncationLength, 10), 20)
@@ -67,9 +68,37 @@ struct MenubarWindowView: View {
     @ViewBuilder
     var songDetails: some View {
         VStack {
-            HStack {
+            HStack(spacing: 8) {
                 MarqueeText(viewmodel.currentlyPlayingName ?? "-", startDelay: 1.5, alignment: .leading, leftFade: 2)
-                .frame(height: 15)
+                    .frame(height: 15)
+
+                Button {
+                    guard !isPlaybackResyncing else { return }
+                    isPlaybackResyncing = true
+                    Task {
+                        await viewmodel.resyncPlaybackAndLyrics()
+                        isPlaybackResyncing = false
+                    }
+                } label: {
+                    Group {
+                        if isPlaybackResyncing {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                    }
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.accessoryBar)
+                .disabled(!viewmodel.userDefaultStorage.hasOnboarded || !viewmodel.isPlayerRunning || isPlaybackResyncing)
+                .help("重新同步播放进度与歌词")
+                .accessibilityLabel("重新同步播放进度与歌词")
+                .onHover { isHovering in
+                    currentHoveredItem = isHovering ? .resyncPlayback : .none
+                }
             }
             HStack {
                 MarqueeText(viewmodel.currentlyPlayingArtist ?? "-", startDelay: 1.5, alignment: .leading, leftFade: 2)

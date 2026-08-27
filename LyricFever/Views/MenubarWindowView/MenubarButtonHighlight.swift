@@ -24,6 +24,7 @@ enum MenubarButtonHighlight {
     case unavailableKaraoke
     case refreshLyrics
     case refreshingLyrics
+    case resyncPlayback
     case search
     case translate
     case translateEnabled
@@ -74,6 +75,8 @@ enum MenubarButtonHighlight {
                 LocalizedStringKey("Redownload lyrics")
             case .refreshingLyrics:
                 LocalizedStringKey("Refreshing Lyrics...")
+            case .resyncPlayback:
+                LocalizedStringKey("重新同步播放进度与歌词")
             case .search:
                 LocalizedStringKey("Manual lyric search")
             case .translate:
